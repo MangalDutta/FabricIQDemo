@@ -42,6 +42,10 @@ on:
         description: 'Fabric Data Agent name'
         required: true
         default: 'Customer360Agent'
+      fabric_capacity_name:
+        description: 'Fabric capacity display name (e.g., My F64 Capacity). Leave empty to auto-select.'
+        required: false
+        default: ''
 
 jobs:
   deploy:
@@ -175,7 +179,8 @@ jobs:
             --lakehouse_name "${{ inputs.lakehouse_name }}" \
             --csv_path "sample-data/customer360.csv" \
             --table_name "${{ inputs.table_name }}" \
-            --dataagent_name "${{ inputs.dataagent_name }}"
+            --dataagent_name "${{ inputs.dataagent_name }}" \
+            --capacity_display_name "${{ inputs.fabric_capacity_name }}"
           echo "✅ Fabric setup complete"
 
       - name: Deployment Summary
@@ -198,5 +203,6 @@ jobs:
           echo "  Lakehouse: ${{ inputs.lakehouse_name }}"
           echo "  Table: ${{ inputs.table_name }}"
           echo "  Data Agent: ${{ inputs.dataagent_name }}"
+          echo "  Capacity: ${{ inputs.fabric_capacity_name }}"
           echo ""
           echo "================================================"
