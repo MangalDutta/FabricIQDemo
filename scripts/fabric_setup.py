@@ -2,7 +2,8 @@
 import argparse
 import json
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
+
 import requests
 from azure.identity import DefaultAzureCredential
 
@@ -18,9 +19,9 @@ def get_fabric_token() -> str:
 
 def fabric_request(method: str, path: str, token: str, **kwargs) -> requests.Response:
     url = f"{FABRIC_BASE_URL}{path}"
-    headers = kwargs.pop("headers", {})
+    headers = kwargs.pop("headers", {}) or {}
     headers["Authorization"] = f"Bearer {token}"
-    headers["Content-Type"] = "application/json"
+    headers.setdefault("Content-Type", "application/json")
 
     resp = requests.request(method, url, headers=headers, **kwargs)
     if not resp.ok:
@@ -31,66 +32,142 @@ def fabric_request(method: str, path: str, token: str, **kwargs) -> requests.Res
     return resp
 
 
-def find_or_create_workspace(workspace_name: str, token: str) -> str:
-    print(f"🔍 Looking for workspace: {workspace_name}")
+def list_capacities(token: str) -> List[Dict[str, Any]]:
+    """
+    Uses GET /v1/capacities to list capacities the principal can access.[web:259]
+    """
+    print("🔎 Discovering Fabric capacities available to this identity...")
+    resp = fabric_request("GET", "/capacities", token)
+    data = resp.json()
+    caps = data.get("value", []) or []
+
+    if not caps:
+        raise RuntimeError(
+            "No Fabric capacities visible to this identity. "
+            "You need at least one active Fabric or Premium capacity."
+        )
+
+    print("📋 Capacities found:")
+    for c in caps:
+        print(
+            f"  - {c.get('displayName')} "
+            f"(sku={c.get('sku')}, region={c.get('region')}, state={c.get('state')})"
+        )
+    return caps
+
+
+def choose_capacity(
+    token: str, desired_display_name: str | None = None
+) -> Dict[str, Any]:
+    caps = list_capacities(token)
+
+    # If user specified a capacity name, honor that first.
+    if desired_display_name:
+        print(f"\n🎯 Looking for requested capacity: {desired_display_name}")
+        for c in caps:
+            if c.get("displayName") == desired_display_name:
+                if c.get("state") != "Active":
+                    raise RuntimeError(
+                        f"Capacity '{desired_display_name}' is not Active "
+                        f"(state={c.get('state')})."
+                    )
+                print(
+                    f"✓ Using capacity '{desired_display_name}' "
+                    f"(sku={c.get('sku')}, region={c.get('region')})"
+                )
+                return c
+        raise RuntimeError(
+            f"Requested capacity '{desired_display_name}' not found. "
+            "Check the name in Fabric Admin portal → Capacity settings."
+        )
+
+    # Otherwise, pick the first active, Fabric‑capable capacity.
+    print("\n🎯 No capacity name provided. Selecting an active Fabric‑capable capacity...")
+
+    def is_fabric_capable(cap: Dict[str, Any]) -> bool:
+        sku = (cap.get("sku") or "").upper()
+        state = cap.get("state")
+        # F‑SKUs = Fabric capacity, P‑SKUs = Premium per capacity that supports Fabric items.[web:259][web:262]
+        return state == "Active" and (sku.startswith("F") or sku.startswith("P"))
+
+    fabric_caps = [c for c in caps if is_fabric_cap(c)]
+
+    if not fabric_caps:
+        raise RuntimeError(
+            "No active Fabric‑capable capacity found. "
+            "You need an F‑SKU or Premium P‑SKU capacity with Fabric enabled."
+        )
+
+    chosen = fabric_caps[0]
+    print(
+        f"✓ Auto‑selected capacity '{chosen.get('displayName')}' "
+        f"(sku={chosen.get('sku')}, region={chosen.get('region')})"
+    )
+    return chosen
+
+
+def find_workspace_by_name(workspace_name: str, token: str) -> str:
+    print(f"\n🔍 Looking for workspace: {workspace_name}")
     resp = fabric_request("GET", "/workspaces", token)
     data = resp.json()
 
-    for workspace in data.get("value", []):
-        if workspace.get("displayName") == workspace_name:
-            ws_id = workspace["id"]
+    for ws in data.get("value", []):
+        if ws.get("displayName") == workspace_name:
+            ws_id = ws["id"]
             print(f"✓ Found existing workspace: {workspace_name} (ID: {ws_id})")
+            # Optional: show capacity binding if present in payload.
+            if "capacityId" in ws:
+                print(f"   Workspace capacityId: {ws['capacityId']}")
             return ws_id
 
-    print(f"📦 Workspace not found. Creating new workspace: {workspace_name}")
-    payload = {"displayName": workspace_name}
-    resp = fabric_request("POST", "/workspaces", token, json=payload)
-    workspace = resp.json()
-    ws_id = workspace["id"]
-    print(f"✓ Created workspace: {workspace_name} (ID: {ws_id})")
-    return ws_id
-
-
-def ensure_lakehouse(workspace_id: str, lakehouse_name: str, token: str) -> str:
-    print(f"🏗️  Checking lakehouse: {lakehouse_name}")
-    resp = fabric_request(
-        "GET",
-        f"/workspaces/{workspace_id}/items?type=Lakehouse",
-        token,
+    raise RuntimeError(
+        f"Workspace '{workspace_name}' not found. "
+        "Create it in Fabric portal and bind it to a Fabric capacity."
     )
-    items = resp.json().get("value", [])
+
+
+def find_lakehouse_by_name(workspace_id: str, lakehouse_name: str, token: str) -> str:
+    print(f"\n🏗️  Checking lakehouse: {lakehouse_name}")
+    resp = fabric_request(
+        "GET", f"/workspaces/{workspace_id}/items?type=Lakehouse", token
+    )
+    items = resp.json().get("value", []) or []
 
     for item in items:
         if item.get("displayName") == lakehouse_name:
             lh_id = item["id"]
-            print(f"✓ Lakehouse exists: {lakehouse_name}")
+            print(f"✓ Found existing lakehouse: {lakehouse_name} (ID: {lh_id})")
             return lh_id
 
-    print(f"📦 Creating lakehouse: {lakehouse_name}")
-    payload = {"displayName": lakehouse_name}
-    resp = fabric_request(
-        "POST",
-        f"/workspaces/{workspace_id}/lakehouses",
-        token,
-        json=payload,
+    raise RuntimeError(
+        f"Lakehouse '{lakehouse_name}' not found in workspace. "
+        "Create it manually in Fabric UI (same workspace & capacity) "
+        "or add creation logic here once capacity is confirmed."
     )
-    lakehouse = resp.json()
-    print(f"✓ Created lakehouse: {lakehouse_name}")
-    return lakehouse["id"]
 
 
 def main(argv=None) -> None:
-    parser = argparse.ArgumentParser(description="Fabric Customer360 setup automation")
+    parser = argparse.ArgumentParser(
+        description="Fabric Customer360 setup (use existing capacity, workspace & lakehouse)"
+    )
     parser.add_argument("--workspace_name", required=True)
     parser.add_argument("--lakehouse_name", required=True)
     parser.add_argument("--csv_path", required=True)
     parser.add_argument("--table_name", required=True)
     parser.add_argument("--dataagent_name", required=True)
+    parser.add_argument(
+        "--capacity_display_name",
+        required=False,
+        help=(
+            "Optional Fabric capacity displayName to use. "
+            "If omitted, the script auto‑selects an active Fabric‑capable capacity."
+        ),
+    )
 
     args = parser.parse_args(argv)
 
     print("=" * 60)
-    print("🚀 Fabric Customer360 Setup Starting")
+    print("🚀 Fabric Customer360 Setup (Existing Capacity & Workspace) Starting")
     print("=" * 60)
 
     try:
@@ -98,14 +175,20 @@ def main(argv=None) -> None:
         token = get_fabric_token()
         print("✓ Authentication successful")
 
-        workspace_id = find_or_create_workspace(args.workspace_name, token)
-        lakehouse_id = ensure_lakehouse(workspace_id, args.lakehouse_name, token)
+        # 1) Ensure we have a Fabric‑capable capacity and pick one.
+        capacity = choose_capacity(token, args.capacity_display_name)
 
-        print()
-        print("=" * 60)
-        print("✅ Fabric Customer360 Setup Complete!")
+        # 2) Use existing workspace & lakehouse (no creation).
+        workspace_id = find_workspace_by_name(args.workspace_name, token)
+        lakehouse_id = find_lakehouse_by_name(workspace_id, args.lakehouse_name, token)
+
+        print("\n" + "=" * 60)
+        print("✅ Fabric Customer360 Setup Complete (Existing Resources Used)!")
         print("=" * 60)
         result = {
+            "capacity_id": capacity.get("id"),
+            "capacity_display_name": capacity.get("displayName"),
+            "capacity_sku": capacity.get("sku"),
             "workspace_id": workspace_id,
             "lakehouse_id": lakehouse_id,
             "table_name": args.table_name,
