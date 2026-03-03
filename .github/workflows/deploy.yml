@@ -180,7 +180,7 @@ jobs:
             --csv_path "sample-data/customer360.csv" \
             --table_name "${{ inputs.table_name }}" \
             --dataagent_name "${{ inputs.dataagent_name }}" \
-            --capacity_display_name "${{ inputs.fabric_capacity_name }}"
+            --capacity_id "${{ inputs.fabric_capacity_id }}"
           echo "✅ Fabric setup complete"
 
       - name: Deployment Summary
@@ -203,6 +203,6 @@ jobs:
           echo "  Lakehouse: ${{ inputs.lakehouse_name }}"
           echo "  Table: ${{ inputs.table_name }}"
           echo "  Data Agent: ${{ inputs.dataagent_name }}"
-          echo "  Capacity: ${{ inputs.fabric_capacity_name }}"
+          echo "  CapacityId: ${{ inputs.fabric_capacity_id }}"
           echo ""
           echo "================================================"
