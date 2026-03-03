@@ -42,8 +42,8 @@ on:
         description: 'Fabric Data Agent name'
         required: true
         default: 'Customer360Agent'
-      fabric_capacity_name:
-        description: 'Fabric capacity display name (e.g., My F64 Capacity). Leave empty to auto-select.'
+      fabric_capacity_id:
+        description: 'Fabric capacityId (GUID from Fabric Admin → Capacity settings). Optional.'
         required: false
         default: ''
 
