@@ -1,0 +1,11 @@
+CustomerId,FullName,State,City,Segment,LifetimeValue,MonthlyRevenue,ChurnRiskScore,LastPurchaseDate
+CUST-0001,Anita Rao,Karnataka,Bengaluru,Enterprise,150000,25000,0.12,2025-12-15
+CUST-0002,Rahul Sharma,Maharashtra,Mumbai,SMB,90000,12000,0.35,2025-11-20
+CUST-0003,Leena Nair,Maharashtra,Pune,MidMarket,120000,18000,0.22,2025-12-30
+CUST-0004,Sanjay Iyer,Karnataka,Mysuru,SMB,45000,6000,0.48,2025-10-05
+CUST-0005,Priya Menon,Tamil Nadu,Chennai,Enterprise,200000,32000,0.08,2026-01-10
+CUST-0006,Amit Patel,Gujarat,Ahmedabad,MidMarket,85000,14000,0.19,2025-12-01
+CUST-0007,Deepa Kumar,Karnataka,Bengaluru,Enterprise,175000,28000,0.10,2026-01-15
+CUST-0008,Rajesh Gupta,Maharashtra,Mumbai,SMB,55000,8000,0.42,2025-11-10
+CUST-0009,Kavita Singh,Delhi,New Delhi,MidMarket,95000,15000,0.25,2025-12-20
+CUST-0010,Vijay Reddy,Telangana,Hyderabad,Enterprise,180000,30000,0.09,2026-01-05
