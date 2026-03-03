@@ -13,12 +13,16 @@ FABRIC_BASE_URL = "https://api.fabric.microsoft.com/v1"
 
 
 def get_fabric_token() -> str:
+    """Get a Fabric access token using DefaultAzureCredential."""
     credential = DefaultAzureCredential()
     token = credential.get_token(FABRIC_SCOPE)
     return token.token
 
 
 def fabric_request(method: str, path: str, token: str, **kwargs) -> requests.Response:
+    """
+    Helper to call the Fabric REST API with the right base URL and Authorization header.
+    """
     url = f"{FABRIC_BASE_URL}{path}"
     headers = kwargs.pop("headers", {}) or {}
     headers["Authorization"] = f"Bearer {token}"
@@ -34,17 +38,20 @@ def fabric_request(method: str, path: str, token: str, **kwargs) -> requests.Res
 
 
 def list_workspaces(token: str) -> List[Dict[str, Any]]:
+    """Return all workspaces visible to this identity."""
     resp = fabric_request("GET", "/workspaces", token)
     data = resp.json()
     return data.get("value", []) or []
 
 
 def get_or_create_workspace(
-    workspace_name: str, capacity_id: str | None, token: str
+    workspace_name: str,
+    capacity_id: str | None,
+    token: str,
 ) -> str:
     """
     If a workspace with displayName == workspace_name exists, return its id.
-    Otherwise create it, passing capacityId in the payload when provided.[page:1]
+    Otherwise create it, passing capacityId in the payload when provided.[web:316]
     """
     print(f"🔍 Looking for workspace: {workspace_name}")
     workspaces = list_workspaces(token)
@@ -61,14 +68,14 @@ def get_or_create_workspace(
     payload: Dict[str, Any] = {
         "displayName": workspace_name,
     }
-    # Use capacityId if provided, as shown in the blog example.[page:1]
+    # Use capacityId if provided, as shown in the REST docs and blog examples.[web:316][page:1]
     if capacity_id:
         payload["capacityId"] = capacity_id
 
     # POST /workspaces
     resp = fabric_request("POST", "/workspaces", token, json=payload)
 
-    # The blog pattern uses the Location header to get the new workspace id.[page:1]
+    # Official pattern: read the new workspace id from the Location header.[web:316][page:1]
     location_header = resp.headers.get("Location")
     if not location_header:
         raise RuntimeError(
@@ -85,15 +92,21 @@ def get_or_create_workspace(
 
 
 def get_or_create_lakehouse(
-    workspace_id: str, lakehouse_name: str, token: str
+    workspace_id: str,
+    lakehouse_name: str,
+    token: str,
 ) -> str:
     """
     Check if a lakehouse already exists in the workspace; if not, create it.
+    Uses the Lakehouse Items API.[web:1][web:313]
     """
     print(f"🏗️  Checking lakehouse: {lakehouse_name}")
-    # List lakehouses
+
+    # List lakehouses in this workspace
     resp = fabric_request(
-        "GET", f"/workspaces/{workspace_id}/items?type=Lakehouse", token
+        "GET",
+        f"/workspaces/{workspace_id}/items?type=Lakehouse",
+        token,
     )
     items = resp.json().get("value", []) or []
 
@@ -108,10 +121,15 @@ def get_or_create_lakehouse(
         "displayName": lakehouse_name,
         "description": "Lakehouse created by Fabric Customer360 deployment",
     }
+
+    # POST /workspaces/{workspaceId}/lakehouses[web:1][web:319]
     resp = fabric_request(
-        "POST", f"/workspaces/{workspace_id}/lakehouses", token, json=payload
+        "POST",
+        f"/workspaces/{workspace_id}/lakehouses",
+        token,
+        json=payload,
     )
-    # New lakehouse id is returned in body
+
     data = resp.json()
     lakehouse_id = data.get("id")
     if not lakehouse_id:
@@ -123,7 +141,10 @@ def get_or_create_lakehouse(
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
-        description="Fabric Customer360 setup (create workspace with capacityId, then lakehouse)"
+        description=(
+            "Fabric Customer360 setup "
+            "(create or reuse workspace with capacityId, then lakehouse)"
+        )
     )
     parser.add_argument("--workspace_name", required=True)
     parser.add_argument("--lakehouse_name", required=True)
@@ -152,15 +173,20 @@ def main(argv=None) -> None:
 
         # 1) Get or create workspace, binding to capacityId if provided.
         workspace_id = get_or_create_workspace(
-            args.workspace_name, args.capacity_id, token
+            args.workspace_name,
+            args.capacity_id,
+            token,
         )
 
         # 2) Get or create lakehouse in that workspace.
         lakehouse_id = get_or_create_lakehouse(
-            workspace_id, args.lakehouse_name, token
+            workspace_id,
+            args.lakehouse_name,
+            token,
         )
 
-        # TODO: Add CSV upload + table creation + data agent setup here if needed.
+        # TODO: Add CSV upload, table creation, and data agent setup here,
+        # using the lakehouse REST APIs and your csv_path/table_name/dataagent_name.
 
         print("\n" + "=" * 60)
         print("✅ Fabric Customer360 Setup Complete!")
