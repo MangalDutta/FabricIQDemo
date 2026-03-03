@@ -87,7 +87,7 @@ def choose_capacity(
     def is_fabric_capable(cap: Dict[str, Any]) -> bool:
         sku = (cap.get("sku") or "").upper()
         state = cap.get("state")
-        # F‑SKUs = Fabric capacity, P‑SKUs = Premium per capacity that supports Fabric items.[web:259][web:262]
+        # F‑SKUs = Fabric capacity, P‑SKUs = Premium per capacity that supports Fabric items.[web:259][web:295]
         return state == "Active" and (sku.startswith("F") or sku.startswith("P"))
 
     fabric_caps = [c for c in caps if is_fabric_cap(c)]
@@ -115,7 +115,6 @@ def find_workspace_by_name(workspace_name: str, token: str) -> str:
         if ws.get("displayName") == workspace_name:
             ws_id = ws["id"]
             print(f"✓ Found existing workspace: {workspace_name} (ID: {ws_id})")
-            # Optional: show capacity binding if present in payload.
             if "capacityId" in ws:
                 print(f"   Workspace capacityId: {ws['capacityId']}")
             return ws_id
@@ -141,8 +140,7 @@ def find_lakehouse_by_name(workspace_id: str, lakehouse_name: str, token: str) -
 
     raise RuntimeError(
         f"Lakehouse '{lakehouse_name}' not found in workspace. "
-        "Create it manually in Fabric UI (same workspace & capacity) "
-        "or add creation logic here once capacity is confirmed."
+        "Create it manually in Fabric UI (same workspace & capacity)."
     )
 
 
@@ -178,7 +176,7 @@ def main(argv=None) -> None:
         # 1) Ensure we have a Fabric‑capable capacity and pick one.
         capacity = choose_capacity(token, args.capacity_display_name)
 
-        # 2) Use existing workspace & lakehouse (no creation).
+        # 2) Use existing workspace & lakehouse (no creation here).
         workspace_id = find_workspace_by_name(args.workspace_name, token)
         lakehouse_id = find_lakehouse_by_name(workspace_id, args.lakehouse_name, token)
 
