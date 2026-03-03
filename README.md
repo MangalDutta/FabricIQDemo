@@ -162,4 +162,3 @@ FIX: Check GitHub → Settings → Secrets → Federated credentials
 
 ---
 
-**Production ready. All deployment blockers resolved.** 🎉
