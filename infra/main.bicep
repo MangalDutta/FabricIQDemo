@@ -29,9 +29,10 @@ var vnetName = 'vnet-${baseName}-${env}'
 var logAnalyticsName = 'log-${baseName}-${env}'
 
 // Fabric capacity name: honour override, else generate from baseName + env.
-// Fabric requires lowercase alphanumeric/hyphens only, so strip anything else.
+// Microsoft.Fabric/capacities names allow lowercase letters and numbers ONLY
+// (no hyphens, underscores, or other special characters).
 var resolvedCapacityName = empty(fabricCapacityName)
-  ? 'cap-${toLower(baseName)}-${toLower(env)}'
+  ? 'cap${replace(toLower(baseName), '-', '')}${replace(toLower(env), '-', '')}'
   : fabricCapacityName
 
 module networking 'modules/networking.bicep' = if (enablePrivateEndpoints) {
