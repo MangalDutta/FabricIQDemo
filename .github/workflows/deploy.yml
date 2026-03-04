@@ -157,11 +157,39 @@ jobs:
             APPI_CS=$(az monitor app-insights component list -g "$RG" \
               --query "[0].connectionString" -o tsv 2>/dev/null || true)
 
-            # Fabric capacity ID: read from the named Bicep deployment output
-            # (empty string when fabricSku was not passed / output is null)
-            FABRIC_CAP_ID=$(az deployment group show \
-              -g "$RG" -n "customer360-infra" \
-              --query "properties.outputs.fabricCapacityId.value" -o tsv 2>/dev/null || true)
+            # Fabric capacity GUID lookup.
+            # The Microsoft.Fabric/capacities ARM resource does NOT expose the
+            # Fabric-internal capacity GUID as a property.  After Bicep provisions
+            # the capacity we query the Fabric REST API (GET /v1/capacities) and
+            # match on the displayName to retrieve the GUID that the workspace
+            # assignment API requires.
+            FABRIC_CAP_ID=""
+            if [ -n "${{ inputs.fabric_sku }}" ]; then
+              # Derive the capacity display name the same way main.bicep does
+              CAP_DISPLAY_NAME="cap-$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]')-$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]')"
+              echo "  Looking up Fabric capacity GUID for: $CAP_DISPLAY_NAME"
+
+              FABRIC_TOKEN=$(az account get-access-token \
+                --resource https://api.fabric.microsoft.com \
+                --query accessToken -o tsv)
+
+              FABRIC_CAP_ID=$(curl -sf \
+                -H "Authorization: Bearer $FABRIC_TOKEN" \
+                "https://api.fabric.microsoft.com/v1/capacities" \
+                | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+target = '$CAP_DISPLAY_NAME'.lower()
+match = next((c['id'] for c in data.get('value', []) if c.get('displayName', '').lower() == target), '')
+print(match)
+" 2>/dev/null || true)
+
+              if [ -n "$FABRIC_CAP_ID" ]; then
+                echo "  ✓ Fabric capacity GUID: $FABRIC_CAP_ID"
+              else
+                echo "  ⚠️  Could not resolve Fabric capacity GUID — workspace will not be assigned to the new capacity"
+              fi
+            fi
 
             echo "acr_name=$ACR_NAME"             >> $GITHUB_OUTPUT
             echo "backend_app=$BE_APP"             >> $GITHUB_OUTPUT
@@ -170,7 +198,6 @@ jobs:
             echo "app_insights_cs=$APPI_CS"       >> $GITHUB_OUTPUT
             echo "fabric_capacity_id=$FABRIC_CAP_ID" >> $GITHUB_OUTPUT
             echo "ACR: $ACR_NAME  Backend: $BE_APP  Frontend: $FE_APP  KV: $KV_NAME"
-            [ -n "$FABRIC_CAP_ID" ] && echo "  New Fabric Capacity ID: $FABRIC_CAP_ID"
 
       # --- Step 3: Build backend Docker image ---
       - name: Build and push backend Docker image

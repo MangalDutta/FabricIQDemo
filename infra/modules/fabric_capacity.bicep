@@ -36,8 +36,9 @@ resource fabricCapacity 'Microsoft.Fabric/capacities@2023-11-01' = {
   }
 }
 
-// fabricCapacityId is the GUID consumed by the Fabric REST API when assigning
-// a workspace to this capacity (distinct from the Azure resource ID).
-output capacityFabricId string = fabricCapacity.properties.fabricCapacityId
+// The Fabric capacity GUID (used by the Fabric REST API to assign a workspace)
+// is NOT exposed as an ARM resource property — it must be retrieved after
+// deployment via GET https://api.fabric.microsoft.com/v1/capacities and
+// matching on displayName == capacityName.
 output capacityName string = fabricCapacity.name
 output capacityAzureResourceId string = fabricCapacity.id
