@@ -126,7 +126,7 @@ jobs:
             # hit a globally-unique name conflict in the Fabric RP.
             FABRIC_PARAMS=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              CAP_DISPLAY_NAME="cap-$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]')-$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]')"
+              CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
               FABRIC_TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv 2>/dev/null || true)
               CAP_ALREADY_EXISTS=""
               if [ -n "$FABRIC_TOKEN" ]; then
@@ -191,7 +191,7 @@ jobs:
             FABRIC_CAP_ID=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
               # Derive the capacity display name the same way main.bicep does
-              CAP_DISPLAY_NAME="cap-$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]')-$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]')"
+              CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
               echo "  Looking up Fabric capacity GUID for: $CAP_DISPLAY_NAME"
 
               FABRIC_TOKEN=$(az account get-access-token \
