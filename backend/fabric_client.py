@@ -38,6 +38,11 @@ FABRIC_BASE_URL = "https://api.fabric.microsoft.com/v1"
 # Seconds before token expiry to pro-actively refresh
 _TOKEN_REFRESH_MARGIN = 60
 
+# Retry config for EntityNotFound on /query — newly provisioned agents need
+# a short warm-up period before they become queryable.
+_AGENT_NOT_READY_RETRIES = 4
+_AGENT_NOT_READY_WAIT = 15  # seconds between retries (up to ~1 min total)
+
 
 class FabricClient:
     """
@@ -146,17 +151,39 @@ class FabricClient:
             message,
         )
 
-        resp = requests.post(
-            self._query_url(),
-            headers=self._headers(),
-            json=payload,
-            timeout=120,
-        )
+        resp = None
+        for _attempt in range(1, _AGENT_NOT_READY_RETRIES + 1):
+            resp = requests.post(
+                self._query_url(),
+                headers=self._headers(),
+                json=payload,
+                timeout=120,
+            )
+            if resp.ok:
+                break
 
-        if not resp.ok:
             # On auth errors, clear the cached token so the next call retries
             if resp.status_code in (401, 403):
                 self._token = None
+
+            # Retry on 404 EntityNotFound — newly provisioned agents need
+            # a brief warm-up period before the /query endpoint is live.
+            if resp.status_code == 404:
+                try:
+                    error_code = resp.json().get("errorCode", "")
+                except Exception:
+                    error_code = ""
+                if error_code == "EntityNotFound" and _attempt < _AGENT_NOT_READY_RETRIES:
+                    logger.warning(
+                        "Data Agent not ready yet (attempt %d/%d) — retrying in %ds",
+                        _attempt,
+                        _AGENT_NOT_READY_RETRIES,
+                        _AGENT_NOT_READY_WAIT,
+                    )
+                    time.sleep(_AGENT_NOT_READY_WAIT)
+                    continue
+
+            # Any other non-2xx (or exhausted retries) — surface the error
             error_detail = resp.text[:400]
             logger.error(
                 "Fabric Data Agent API error [%d]: %s",

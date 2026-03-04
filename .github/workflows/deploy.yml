@@ -214,9 +214,17 @@ jobs:
             WORKSPACE_ID="${{ steps.fabric_setup.outputs.workspace_id }}"
             DATAAGENT_ID="${{ steps.fabric_setup.outputs.dataagent_id }}"
 
+            # Resolve Power BI URL: prefer the manually supplied input, then
+            # fall back to what fabric_setup auto-created.
+            PBI_URL="${{ inputs.powerbi_report_url }}"
+            if [ -z "$PBI_URL" ]; then
+              PBI_URL="${{ steps.fabric_setup.outputs.powerbi_embed_url }}"
+            fi
+
             echo "Configuring backend ($BE)..."
             echo "  FABRIC_WORKSPACE_ID = $WORKSPACE_ID"
             echo "  FABRIC_DATAAGENT_ID = $DATAAGENT_ID"
+            echo "  POWERBI_REPORT_URL  = $PBI_URL"
 
             ACR_USER=$(az acr credential show --name "$ACR" --query "username" -o tsv)
             ACR_PASS=$(az acr credential show --name "$ACR" --query "passwords[0].value" -o tsv)
@@ -233,6 +241,7 @@ jobs:
               --settings \
                 FABRIC_WORKSPACE_ID="$WORKSPACE_ID" \
                 FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
+                POWERBI_REPORT_URL="$PBI_URL" \
                 CORS_ALLOWED_ORIGINS="$FE_URL" \
                 APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.outputs.outputs.app_insights_cs }}" \
                 WEBSITES_ENABLE_APP_SERVICE_STORAGE="false" \
