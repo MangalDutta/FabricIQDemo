@@ -14,10 +14,12 @@ Conversation history:
   would persist this in Redis or a database.
 
 Environment variables required:
-  FABRIC_WORKSPACE_ID   – Fabric workspace GUID
+  FABRIC_WORKSPACE_ID   - Fabric workspace GUID
                           (output from fabric_setup.py as 'workspace_id')
-  FABRIC_DATAAGENT_ID   – Fabric Data Agent item GUID
+  FABRIC_DATAAGENT_ID   - Fabric Data Agent item GUID
                           (output from fabric_setup.py as 'dataagent_id')
+  FABRIC_DATAAGENT_NAME - Display name of the Data Agent (default: Customer360Agent)
+                          Used to auto-rediscover the agent when the stored ID is stale.
 """
 
 import logging
@@ -71,6 +73,9 @@ class FabricClient:
     def __init__(self) -> None:
         self.workspace_id: str = os.environ.get("FABRIC_WORKSPACE_ID", "").strip()
         self.dataagent_id: str = os.environ.get("FABRIC_DATAAGENT_ID", "").strip()
+        self.dataagent_name: str = os.environ.get(
+            "FABRIC_DATAAGENT_NAME", "Customer360Agent"
+        ).strip()
 
         if not self.workspace_id:
             raise ValueError(
@@ -91,9 +96,10 @@ class FabricClient:
         self._histories: Dict[str, List[Dict[str, str]]] = {}
 
         logger.info(
-            "FabricClient initialized (workspace=%s, agent=%s)",
+            "FabricClient initialized (workspace=%s, agent=%s, agent_name=%s)",
             self.workspace_id,
             self.dataagent_id,
+            self.dataagent_name,
         )
 
     # ─── Authentication ──────────────────────────────────────────────────────
@@ -123,6 +129,48 @@ class FabricClient:
             f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
             f"/dataAgents/{self.dataagent_id}/query"
         )
+
+    # ─── Auto-discovery ──────────────────────────────────────────────────────
+
+    def _discover_agent_id(self) -> Optional[str]:
+        """
+        Scan the workspace for a Data Agent whose displayName matches
+        self.dataagent_name.  Called automatically when the stored
+        FABRIC_DATAAGENT_ID returns 404, so the backend self-heals after
+        a re-deploy recreated the agent with a new GUID.
+
+        Returns the discovered agent ID, or None if not found.
+        """
+        try:
+            list_url = (
+                f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}/dataAgents"
+            )
+            resp = requests.get(list_url, headers=self._headers(), timeout=30)
+            if not resp.ok:
+                logger.warning(
+                    "Agent discovery: GET /dataAgents returned %d", resp.status_code
+                )
+                return None
+            agents = resp.json().get("value", [])
+            target = self.dataagent_name.lower()
+            for agent in agents:
+                if agent.get("displayName", "").lower() == target:
+                    discovered_id: str = agent["id"]
+                    logger.info(
+                        "Agent discovery: found '%s' with ID %s (was %s)",
+                        self.dataagent_name,
+                        discovered_id,
+                        self.dataagent_id,
+                    )
+                    return discovered_id
+            logger.warning(
+                "Agent discovery: no agent named '%s' found in workspace %s",
+                self.dataagent_name,
+                self.workspace_id,
+            )
+        except Exception as exc:
+            logger.warning("Agent discovery failed (non-fatal): %s", exc)
+        return None
 
     # ─── Public chat method ──────────────────────────────────────────────────
 
@@ -166,24 +214,58 @@ class FabricClient:
             if resp.status_code in (401, 403):
                 self._token = None
 
-            # Retry on 404 EntityNotFound — newly provisioned agents need
-            # a brief warm-up period before the /query endpoint is live.
+            # Retry on 404 EntityNotFound:
+            #   - If this is an early attempt, the agent may just need warm-up
+            #     time after a fresh deploy — wait and retry.
+            #   - After all warm-up retries, attempt auto-discovery: search the
+            #     workspace for an agent named self.dataagent_name. If found,
+            #     update self.dataagent_id and retry once with the new ID.
+            #     This self-heals the backend when a re-deploy created a new
+            #     agent GUID without restarting the App Service.
             if resp.status_code == 404:
                 try:
                     error_code = resp.json().get("errorCode", "")
                 except Exception:
                     error_code = ""
-                if error_code == "EntityNotFound" and _attempt < _AGENT_NOT_READY_RETRIES:
-                    logger.warning(
-                        "Data Agent not ready yet (attempt %d/%d) — retrying in %ds",
-                        _attempt,
-                        _AGENT_NOT_READY_RETRIES,
-                        _AGENT_NOT_READY_WAIT,
-                    )
-                    time.sleep(_AGENT_NOT_READY_WAIT)
-                    continue
 
-            # Any other non-2xx (or exhausted retries) — surface the error
+                if error_code == "EntityNotFound":
+                    if _attempt < _AGENT_NOT_READY_RETRIES:
+                        logger.warning(
+                            "Data Agent not ready yet (attempt %d/%d) - retrying in %ds",
+                            _attempt,
+                            _AGENT_NOT_READY_RETRIES,
+                            _AGENT_NOT_READY_WAIT,
+                        )
+                        time.sleep(_AGENT_NOT_READY_WAIT)
+                        continue
+
+                    # Warm-up retries exhausted — try auto-discovery
+                    logger.warning(
+                        "Stored agent ID '%s' returned 404 after %d retries. "
+                        "Attempting auto-discovery by name '%s'...",
+                        self.dataagent_id,
+                        _AGENT_NOT_READY_RETRIES,
+                        self.dataagent_name,
+                    )
+                    discovered = self._discover_agent_id()
+                    if discovered and discovered != self.dataagent_id:
+                        self.dataagent_id = discovered
+                        # Retry once with the discovered ID
+                        resp = requests.post(
+                            self._query_url(),
+                            headers=self._headers(),
+                            json=payload,
+                            timeout=120,
+                        )
+                        if resp.ok:
+                            break
+                        logger.error(
+                            "Discovered agent ID %s also returned %d",
+                            discovered,
+                            resp.status_code,
+                        )
+
+            # Any other non-2xx (or unrecoverable 404) — surface the error
             error_detail = resp.text[:400]
             logger.error(
                 "Fabric Data Agent API error [%d]: %s",
@@ -192,14 +274,11 @@ class FabricClient:
             )
             if resp.status_code == 404:
                 raise RuntimeError(
-                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound) after "
-                    f"{_AGENT_NOT_READY_RETRIES} retries. "
-                    f"The stored agent ID '{self.dataagent_id}' is stale or invalid. "
-                    f"Re-run the deploy workflow to recreate the agent and refresh "
-                    f"the FABRIC_DATAAGENT_ID App Service setting, or go to "
-                    f"https://app.fabric.microsoft.com, open the workspace, find "
-                    f"'Customer360Agent', copy its ID from the URL, and update "
-                    f"FABRIC_DATAAGENT_ID in the backend App Service configuration."
+                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound). "
+                    f"Auto-discovery for '{self.dataagent_name}' also failed. "
+                    f"Go to https://app.fabric.microsoft.com, open the workspace, "
+                    f"confirm '{self.dataagent_name}' exists, then re-run the "
+                    f"deploy workflow to refresh FABRIC_DATAAGENT_ID."
                 )
             raise RuntimeError(
                 f"Fabric Data Agent returned HTTP {resp.status_code}: {error_detail}"
