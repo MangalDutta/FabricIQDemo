@@ -3,8 +3,9 @@
 Fabric Customer360 Setup Script
 --------------------------------
 Creates/finds Fabric workspace, binds to capacity, creates Lakehouse,
-uploads CSV to OneLake Files, loads CSV as a Delta table, and creates
-the Fabric Data Agent connected to that Lakehouse.
+uploads CSV to OneLake Files, loads CSV as a Delta table, creates the
+Fabric Data Agent connected to that Lakehouse, and locates the default
+Semantic Model + Power BI Report for embedding.
 
 Usage:
     python fabric_setup.py \
@@ -495,13 +496,138 @@ def get_or_create_dataagent(
     )
 
 
+# ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
+
+def get_default_semantic_model(
+    workspace_id: str,
+    lakehouse_name: str,
+    token: str,
+    retries: int = 6,
+) -> Optional[str]:
+    """
+    Finds the default Power BI Semantic Model that Fabric auto-creates when
+    a Lakehouse is provisioned.  Its display name matches the Lakehouse name.
+
+    Retries up to `retries` times (30-second intervals) because Fabric may
+    take a minute to materialise the default semantic model after table load.
+
+    Returns the semantic model item ID, or None if not found.
+    """
+    print(f"📐 Looking for default semantic model: {lakehouse_name}")
+    for attempt in range(1, retries + 1):
+        resp = fabric_request(
+            "GET", f"/workspaces/{workspace_id}/items?type=SemanticModel", token
+        )
+        for item in resp.json().get("value", []) or []:
+            if item.get("displayName") == lakehouse_name:
+                sm_id = item["id"]
+                print(f"✓ Found default semantic model: {lakehouse_name} (ID: {sm_id})")
+                return sm_id
+        if attempt < retries:
+            print(
+                f"   ↻ [{attempt}/{retries}] Semantic model not ready yet — "
+                f"waiting 30s for Fabric to materialise it..."
+            )
+            time.sleep(30)
+
+    print(
+        f"   ⚠️  Default semantic model '{lakehouse_name}' not found after retries.\n"
+        "   You can create a Power BI report manually in the Fabric portal later."
+    )
+    return None
+
+
+# ─── Power BI Report ──────────────────────────────────────────────────────────
+
+def get_or_create_report(
+    workspace_id: str,
+    report_name: str,
+    semantic_model_id: str,
+    token: str,
+) -> Optional[str]:
+    """
+    Finds or creates a Power BI report in the workspace linked to the given
+    semantic model.  Returns the report item ID, or None on failure.
+    """
+    print(f"📊 Checking for Power BI report: {report_name}")
+
+    # ── Check for an existing report ─────────────────────────────────────
+    resp = fabric_request(
+        "GET", f"/workspaces/{workspace_id}/items?type=Report", token
+    )
+    for item in resp.json().get("value", []) or []:
+        if item.get("displayName") == report_name:
+            report_id = item["id"]
+            print(f"✓ Found existing report: {report_name} (ID: {report_id})")
+            return report_id
+
+    # ── Create via Fabric items API ───────────────────────────────────────
+    print(f"📦 Creating Power BI report: {report_name}")
+    try:
+        create_resp = requests.post(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/reports",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "displayName": report_name,
+                "semanticModelId": semantic_model_id,
+            },
+            timeout=60,
+        )
+
+        if create_resp.status_code in (200, 201):
+            report_id = create_resp.json().get("id")
+            if report_id:
+                print(f"✓ Created report: {report_name} (ID: {report_id})")
+                return report_id
+
+        elif create_resp.status_code == 202:
+            op_id = create_resp.headers.get("x-ms-operation-id")
+            if op_id:
+                poll_operation(op_id, token, "report creation")
+            # Re-fetch after async creation
+            resp2 = fabric_request(
+                "GET", f"/workspaces/{workspace_id}/items?type=Report", token
+            )
+            for item in resp2.json().get("value", []) or []:
+                if item.get("displayName") == report_name:
+                    report_id = item["id"]
+                    print(f"✓ Report ready: {report_name} (ID: {report_id})")
+                    return report_id
+        else:
+            print(
+                f"   ⚠️  Report creation returned HTTP {create_resp.status_code}: "
+                f"{create_resp.text[:200]}\n"
+                "   Create the report manually in the Fabric portal."
+            )
+    except Exception as exc:
+        print(f"   ⚠️  Report creation failed: {exc}\n"
+              "   Create the report manually in the Fabric portal.")
+    return None
+
+
+def build_powerbi_embed_url(workspace_id: str, report_id: Optional[str]) -> str:
+    """
+    Returns an embed URL for the Power BI report.
+    autoAuth=true enables SSO when the viewer is already logged into Microsoft.
+    """
+    if not report_id:
+        return ""
+    return (
+        f"https://app.powerbi.com/reportEmbed"
+        f"?reportId={report_id}&groupId={workspace_id}&autoAuth=true"
+    )
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Fabric Customer360 setup: workspace → capacity binding → lakehouse "
-            "→ CSV upload → table load → Data Agent"
+            "→ CSV upload → table load → Data Agent → Semantic Model → PBI Report"
         )
     )
     parser.add_argument("--workspace_name", required=True, help="Fabric workspace display name")
@@ -511,7 +637,8 @@ def main(argv=None) -> None:
     parser.add_argument("--dataagent_name", required=True, help="Fabric Data Agent display name")
     parser.add_argument(
         "--capacity_id",
-        required=True,
+        required=False,
+        default="",
         help="Fabric capacityId GUID (from Fabric Admin → Capacity settings)",
     )
     parser.add_argument(
@@ -519,6 +646,12 @@ def main(argv=None) -> None:
         action="store_true",
         default=False,
         help="Skip CSV upload and table load (useful if table already exists)",
+    )
+    parser.add_argument(
+        "--report_name",
+        required=False,
+        default="Customer360 Report",
+        help="Display name for the Power BI report to create",
     )
 
     args = parser.parse_args(argv)
@@ -574,23 +707,63 @@ def main(argv=None) -> None:
 
         # ── 5 / 6. Data Agent ─────────────────────────────────────────────
         step_label = "Step 5" if args.skip_data_upload else "Step 6"
-        print(f"\n🤖 {step_label}: Data Agent")
+        print(f"\n🤖 {step_label}: Fabric Data Agent")
         dataagent_id = get_or_create_dataagent(
             workspace_id, args.dataagent_name, lakehouse_id, fabric_token
         )
+
+        # ── 6 / 7. Semantic Model (default from Lakehouse) ────────────────
+        next_step = 6 if args.skip_data_upload else 7
+        print(f"\n📐 Step {next_step}: Semantic Model")
+        # Re-acquire token in case it expired during data upload
+        fabric_token = get_fabric_token()
+        semantic_model_id = get_default_semantic_model(
+            workspace_id, args.lakehouse_name, fabric_token
+        )
+
+        # ── 7 / 8. Power BI Report ────────────────────────────────────────
+        next_step += 1
+        print(f"\n📊 Step {next_step}: Power BI Report")
+        report_id: Optional[str] = None
+        if semantic_model_id:
+            report_id = get_or_create_report(
+                workspace_id, args.report_name, semantic_model_id, fabric_token
+            )
+
+        powerbi_embed_url = build_powerbi_embed_url(workspace_id, report_id)
+        workspace_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
 
         # ── Summary ───────────────────────────────────────────────────────
         print("\n" + "=" * 65)
         print("✅ Fabric Customer360 Setup Complete!")
         print("=" * 65)
         result = {
-            "workspace_id": workspace_id,
-            "lakehouse_id": lakehouse_id,
-            "table_name": args.table_name,
-            "dataagent_id": dataagent_id,
-            "capacity_id": args.capacity_id,
+            "workspace_id":       workspace_id,
+            "lakehouse_id":       lakehouse_id,
+            "table_name":         args.table_name,
+            "dataagent_id":       dataagent_id,
+            "semantic_model_id":  semantic_model_id or "",
+            "report_id":          report_id or "",
+            "powerbi_embed_url":  powerbi_embed_url,
+            "workspace_url":      workspace_url,
+            "capacity_id":        args.capacity_id,
         }
         print(json.dumps(result, indent=2))
+
+        if not powerbi_embed_url:
+            print(
+                "\n💡 Power BI report not created automatically.\n"
+                "   To embed a Power BI report in the frontend:\n"
+                f"   1. Open your Fabric workspace: {workspace_url}\n"
+                f"   2. Open '{args.lakehouse_name}' → click 'New report' in the ribbon\n"
+                "   3. Add visuals (e.g. bar chart: State vs LifetimeValue, table of customers)\n"
+                "   4. Save the report\n"
+                "   5. In the report, click File → Embed report → Website or portal\n"
+                "   6. Copy the embed URL\n"
+                "   7. Re-run this GitHub Actions workflow with:\n"
+                "        powerbi_report_url = <copied URL>\n"
+                "        skip_data_upload = true\n"
+            )
 
         # Emit GitHub Actions outputs if running in CI
         github_output = os.environ.get("GITHUB_OUTPUT")

@@ -1,164 +1,307 @@
-# Fabric Customer360 Accelerator 🚀
+# 🚀 AI-Powered Customer 360 Intelligence Platform
+### One-Click Deployment on Microsoft Fabric + Azure
 
-**Fully working one-click deployment to Azure + Fabric** with **all known issues resolved**.
-
-## 🎯 What This Deploys
-
-```
-Azure (Automated):
-├── Container Registry (ACR)
-├── App Service Plan (B1 Linux)
-├── Backend API (FastAPI + Fabric REST)
-├── Frontend UI (React + Chat)
-├── Key Vault (secrets)
-└── Monitoring (Log Analytics)
-
-Fabric (Automated):
-├── Workspace (bound to your capacity)
-├── Lakehouse (Customer360Lakehouse)
-└── Sample data loaded
-```
-
-## ✅ Deployment Status
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Azure Infrastructure | ✅ Complete | Bicep + GitHub Actions |
-| Docker Images | ✅ Complete | Backend + Frontend |
-| App Services | ✅ Running | Containerized apps |
-| Fabric Workspace | ✅ Complete | **Auto-bound to your capacity** |
-| Lakehouse | ✅ Complete | **Auto-created** |
-| Sample Data | ⚠️ Manual | Upload CSV (30 seconds) |
-
-## 🚀 Quick Start (5 minutes)
-
-### Prerequisites
-- Azure subscription
-- **Fabric F-capacity** (F2/F64) with **Contributor role** assigned to your OIDC app
-- GitHub repo with OIDC configured
-
-### 1. Deploy
-```
-Actions → Quick Deploy Customer360 → Run workflow
-```
-**Key inputs:**
-```
-Fabric capacityId: 44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B  # ← YOUR CAPACITY ID
-Workspace name: fabricagentdemo
-```
-
-### 2. Test
-```
-Frontend: https://app-cust360-frontend-dev.azurewebsites.net
-Backend: https://app-cust360-backend-dev.azurewebsites.net/health
-Query: "Top 5 customers by LifetimeValue"
-```
-
-## 🛠️ All Issues Fixed (Proactively Documented)
-
-| Issue | Symptoms | Root Cause | Fix Applied |
-|-------|----------|------------|-------------|
-| **Resource group not created** | `az deployment group create` fails | RG must exist first | Combined `az group create + bicep` |
-| **Key Vault name too long** | 26 chars → 24 max | Azure naming limits | Shortened to `kv-cust-dev-...` |
-| **Frontend Docker fail** | `npm ci` fails | No `package-lock.json` | Changed to `npm install` |
-| **Fabric 401 Unauthorized** | Auth fails | Service principal scopes | Added `Fabric.Workspace.ReadWrite.All` |
-| **403 FeatureNotAvailable (Lakehouse)** | Cannot create lakehouse | Workspace needs F-capacity | **Auto-bind workspace to capacityId** |
-| **403 InsufficientPrivileges (assignToCapacity)** | Cannot re-bind workspace | SP lacks capacity RBAC | **Docs: Add Contributor role to SP** |
-
-## 🔧 Service Principal Permissions Required
-
-Your OIDC app (`azure_client_id`) needs **these Azure RBAC roles**:
-
-### On Fabric Capacity (`44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B`):
-```
-Azure CLI:
-az role assignment create --assignee <YOUR_APP_ID> --role "Contributor" --scope "/subscriptions/.../microsoft.fabric/capacities/44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B"
-```
-
-### Fabric API Scopes (Entra App → API permissions):
-```
-Fabric.Workspace.ReadWrite.All
-Fabric.Lakehouse.ReadWrite.All
-```
-
-### Fabric Tenant Settings (Admin Portal):
-```
-✅ Allow service principals to use Fabric APIs
-✅ Allow service principals to create workspaces
-```
-
-## 📋 Architecture & Flow
-
-```
-1. GitHub Actions (OIDC)
-   ↓ Azure Login
-2. Bicep → Azure Resources (ACR, App Services)
-   ↓ Docker builds
-3. Fabric Setup (Python + Fabric REST API):
-   ├── Find/create workspace fabricagentdemo
-   ├── Bind to capacityId: 44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B
-   └── Create lakehouse Customer360Lakehouse
-4. Apps deployed → Query lakehouse via Fabric REST
-```
-
-## 🎯 Test Your Deployment
-
-**Expected URLs** (from deployment summary):
-```
-Frontend: https://app-cust360-frontend-dev.azurewebsites.net
-Backend:  https://app-cust360-backend-dev.azurewebsites.net/health ✅ 200
-```
-
-**Sample queries:**
-```
-"Top 5 customers by LifetimeValue"
-"Customers from Karnataka"
-"Average LifetimeValue by State"
-```
-
-## 📊 Costs
-
-```
-App Service B1: ~$15/month
-ACR Basic: ~$5/month
-Fabric F2: ~$262/month (pay-as-you-go)
-TOTAL: ~$280/month
-```
-
-## 🔍 Troubleshooting
-
-### Fabric 403 "FeatureNotAvailable"
-```
-→ Workspace not on F-capacity
-FIX: Set fabric_capacity_id = 44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B
-```
-
-### Fabric 403 "InsufficientPrivileges"
-```
-→ SP lacks Contributor on capacity
-FIX: az role assignment create --assignee <APP_ID> --role "Contributor" --scope <CAPACITY_ID>
-```
-
-### Docker npm ci fails
-```
-→ No package-lock.json
-FIX: Already fixed (npm install)
-```
-
-### OIDC auth fails
-```
-→ Wrong client_id/tenant_id
-FIX: Check GitHub → Settings → Secrets → Federated credentials
-```
-
-## 🎉 Success Checklist
-
-- [ ] Workflow completes ✅ (no 403s)
-- [ ] Backend `/health` returns 200 ✅
-- [ ] Frontend loads ✅
-- [ ] Workspace shows capacity `44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B` ✅
-- [ ] Lakehouse `Customer360Lakehouse` exists ✅
-- [ ] Query "Top 5 customers" works ✅
+> **"We transformed traditional BI dashboards into an AI-powered conversational data platform using Microsoft Fabric."**
 
 ---
 
+## 🎯 What This Is
+
+A fully automated, one-click deployment that delivers a **Customer 360 Conversational AI Platform** built entirely on **Microsoft Fabric** — no Azure AI Foundry required.
+
+Business users chat in plain English with their customer data:
+> *"Which customers in Maharashtra are high churn risk?"*
+> *"Top 5 by lifetime value in Karnataka."*
+> *"Show average revenue by segment."*
+
+The **Fabric Data Agent** converts the question to SQL, queries the Lakehouse, and returns the answer instantly.
+
+---
+
+## 🏗️ Architecture (Fabric-Only)
+
+```
+Customer CSV
+    │
+    ▼
+┌─────────────────────────────────────────────┐
+│              MICROSOFT FABRIC                │
+│                                             │
+│  Lakehouse (Delta Table: Customer360)        │
+│       │                                     │
+│       ├──► Default Semantic Model           │
+│       │         │                           │
+│       │         └──► Power BI Report ──────────► Embedded in React App
+│       │                                     │
+│       └──► Fabric Data Agent ──────────────────► Chat API (FastAPI)
+│                (NL → SQL → Answer)          │
+└─────────────────────────────────────────────┘
+                    │
+                    ▼
+         React Chat Interface
+         (Customer 360 AI Analytics)
+```
+
+**Everything runs through Fabric:**
+- Data storage → **Fabric Lakehouse** (OneLake, Delta tables)
+- NL queries → **Fabric Data Agent** (natural language → SQL → results)
+- Visual analytics → **Power BI** (semantic model from Lakehouse, embedded in app)
+- Governance → **Fabric RBAC**, managed identity, unified access
+
+---
+
+## 📦 What Gets Deployed
+
+### Azure Resources (automated via Bicep)
+| Resource | Purpose |
+|---|---|
+| Container Registry (ACR) | Hosts Docker images |
+| App Service Plan (B1 Linux) | Runs both apps |
+| Backend App Service | FastAPI → Fabric Data Agent |
+| Frontend App Service | React chat + Power BI embed |
+| Key Vault | Secrets management |
+| Log Analytics + App Insights | Monitoring |
+
+### Fabric Resources (automated via Python)
+| Resource | Purpose |
+|---|---|
+| Workspace | Bound to your F-capacity |
+| Lakehouse (`Customer360Lakehouse`) | Delta table storage |
+| Delta Table (`Customer360`) | 1,000 customer records |
+| Fabric Data Agent (`Customer360Agent`) | NL chat over the table |
+| Default Semantic Model | Auto-created from Lakehouse |
+| Power BI Report (`Customer360 Report`) | Auto-created from semantic model |
+
+---
+
+## ✅ Prerequisites
+
+Before running the workflow you need:
+
+**1. Azure subscription** with an OIDC app (service principal) configured in GitHub Actions. The service principal needs:
+- `Contributor` on the resource group (or subscription)
+- `Contributor` on the Fabric capacity (for workspace binding)
+
+**2. Fabric F-capacity** (F2 or higher). Get the capacity GUID from:
+`Fabric Admin Portal → Capacity settings → your capacity → copy the GUID`
+
+**3. Fabric Tenant Settings** (Fabric Admin Portal → Tenant Settings):
+```
+✅ Allow service principals to use Fabric APIs
+✅ Allow service principals to create workspaces
+✅ Users can create Fabric items
+```
+
+**4. Entra App API Permissions** (for the service principal):
+```
+Microsoft Fabric API:
+  ✅ Fabric.Workspace.ReadWrite.All
+  ✅ Fabric.Lakehouse.ReadWrite.All
+```
+
+**5. GitHub OIDC** set up (federated credentials on the Entra app pointing to your repo/branch).
+
+---
+
+## 🚀 Deploy in 5 Minutes
+
+### Step 1 — Run the GitHub Actions Workflow
+
+Go to your repo → **Actions** → **Quick Deploy Customer360** → **Run workflow**
+
+Fill in the inputs:
+
+| Input | Example | Notes |
+|---|---|---|
+| `azure_subscription_id` | `xxxxxxxx-...` | Your Azure sub ID |
+| `azure_tenant_id` | `xxxxxxxx-...` | Your Entra tenant ID |
+| `azure_client_id` | `xxxxxxxx-...` | OIDC app client ID |
+| `resource_group` | `rg-customer360-demo` | Created if absent |
+| `location` | `centralindia` | Azure region |
+| `workspace_name` | `fabricagentdemo` | Fabric workspace name |
+| `fabric_capacity_id` | `44BF8C5D-...` | F-capacity GUID |
+| `powerbi_report_url` | *(leave blank first time)* | See Step 3 |
+
+> All other inputs have sensible defaults — leave them as-is for a standard demo.
+
+### Step 2 — Verify the Deployment
+
+After the workflow completes (~10 minutes), check:
+
+```
+Frontend: https://app-cust360-frontend-dev.azurewebsites.net
+Backend:  https://app-cust360-backend-dev.azurewebsites.net/health  → {"status":"healthy"}
+```
+
+Try a chat message — the app should respond with real customer data from the Fabric Data Agent.
+
+### Step 3 — Add Power BI (optional, recommended for demo)
+
+The workflow tries to auto-create a report. If it succeeded, the embed URL is already baked into the frontend. Check the **Deployment Summary** step in the Actions log.
+
+If the report wasn't auto-created (or you want a richer report):
+
+1. Open your Fabric workspace URL (shown in the deployment summary)
+2. Click the Lakehouse → **New report** in the toolbar
+3. Add visuals:
+   - Bar chart: `State` vs `LifetimeValue`
+   - Table: `FullName`, `ChurnRiskScore`, `Segment`, `MonthlyRevenue`
+   - Slicer: `State`
+4. Save the report as `Customer360 Report`
+5. Click **File → Embed report → Website or portal**
+6. Copy the embed URL
+7. Re-run the workflow with:
+   - `powerbi_report_url` = the copied URL
+   - `skip_data_upload` = `true` (data is already loaded)
+
+The frontend will now show the Power BI dashboard on the right side.
+
+---
+
+## 🔧 Manual Quickfix (if you already have Fabric workspace + agent running)
+
+If you want to fix the "No response received" error without a full redeploy, set these two env vars directly in the Azure Portal on the **backend** App Service:
+
+1. Azure Portal → App Services → `app-cust360-backend-dev` → **Configuration** → **Application settings**
+2. Add or update:
+
+| Name | Value |
+|---|---|
+| `FABRIC_WORKSPACE_ID` | Your Fabric workspace GUID |
+| `FABRIC_DATAAGENT_ID` | Your Fabric Data Agent item GUID |
+
+3. Click **Save** → **Restart** the App Service
+
+Then re-run the GitHub Actions workflow to rebuild and deploy the Docker images with the latest `fabric_client.py` code (the old Docker image still has the AI Foundry code).
+
+---
+
+## 💬 Sample Questions for the Demo
+
+```
+"Top 5 customers by LifetimeValue in Maharashtra"
+"Which customers are high churn risk?"
+"Show revenue trend by State"
+"Count customers by Segment"
+"Average ChurnRiskScore by region"
+"Customers in Karnataka with LifetimeValue above 100000"
+```
+
+---
+
+## 🎬 5-Minute Demo Script
+
+1. *"Today our customer data lives in Microsoft Fabric — a unified analytics platform."*
+2. *"Instead of building a new Power BI dashboard for every question, we created a Fabric Data Agent."*
+3. *"Business users simply ask questions in plain English."*
+4. → Ask: **"Which customers are high churn risk?"**
+5. → Show the instant AI response with customer names and scores
+6. → Ask a follow-up: **"Now show only customers from Maharashtra."**  *(Fabric Data Agent maintains context)*
+7. *"The agent understands intent, generates SQL against the Lakehouse, and explains results."*
+8. → Point to the Power BI embed: *"For deep-dive analysis, the embedded Power BI report is right here."*
+9. *"Everything is secured via Azure Managed Identity and Fabric RBAC — enterprise-grade."*
+
+---
+
+## 🏆 Why This Matters
+
+| Traditional BI | This Solution |
+|---|---|
+| Static dashboards | Dynamic AI conversations |
+| BI team dependency for every query | Self-service for business users |
+| Days/weeks for new report | Instant answers |
+| Manual SQL/DAX writing | Natural language |
+| Siloed BI tools | Unified Fabric platform |
+
+---
+
+## 📊 Sample Data Schema
+
+The `Customer360` Delta table (1,000 records):
+
+| Column | Type | Description |
+|---|---|---|
+| `CustomerId` | string | Unique ID (CUST-XXXX) |
+| `FullName` | string | Customer name |
+| `State` | string | Indian state |
+| `City` | string | City |
+| `Segment` | string | Enterprise / SMB / Startup |
+| `LifetimeValue` | decimal | Total LTV in ₹ |
+| `MonthlyRevenue` | decimal | Monthly revenue in ₹ |
+| `ChurnRiskScore` | decimal | 0.0 (low) to 1.0 (high risk) |
+| `LastPurchaseDate` | date | Most recent purchase |
+
+---
+
+## 🔐 Security Model
+
+```
+GitHub Actions (OIDC)  →  Azure Login (no stored secrets)
+        │
+        ▼
+Azure App Service (Managed Identity)
+        │
+        └──► Fabric Data Agent API  (token: api.fabric.microsoft.com)
+        └──► Azure Key Vault        (secrets)
+        └──► ACR                    (container pull)
+```
+
+No passwords stored. No API keys in config files. Production-ready.
+
+---
+
+## 💰 Estimated Monthly Cost
+
+| Resource | Cost |
+|---|---|
+| App Service B1 (×2) | ~$30/month |
+| ACR Basic | ~$5/month |
+| Log Analytics | ~$2/month |
+| Fabric F2 capacity | ~$262/month (pay-as-you-go, pause when not in use) |
+| **Total** | **~$300/month** |
+
+> 💡 Pause the Fabric capacity when not demoing to reduce cost to ~$37/month.
+
+---
+
+## 🔍 Troubleshooting
+
+### "No response received." in the chat
+The backend is reachable but the Fabric Data Agent returned nothing. Causes:
+1. **New code not deployed** → Re-run the GitHub Actions workflow (the old Docker image has the AI Foundry code)
+2. **Missing env vars** → Check `FABRIC_WORKSPACE_ID` and `FABRIC_DATAAGENT_ID` are set on the backend App Service
+3. **Data Agent not configured** → In the Fabric portal, open the Data Agent and verify it has the `Customer360` table linked
+
+### Backend returns 503
+`FABRIC_WORKSPACE_ID` or `FABRIC_DATAAGENT_ID` is empty on the App Service. Set them manually (see Manual Quickfix above) or re-run the workflow.
+
+### Fabric 403 "FeatureNotAvailable"
+Workspace is not bound to an F-capacity. Pass a valid `fabric_capacity_id` in the workflow inputs.
+
+### Fabric 403 "InsufficientPrivileges"
+The service principal lacks `Contributor` on the capacity:
+```bash
+az role assignment create \
+  --assignee <YOUR_APP_CLIENT_ID> \
+  --role "Contributor" \
+  --scope "/subscriptions/<SUB_ID>/providers/Microsoft.Fabric/capacities/<CAPACITY_GUID>"
+```
+
+### Docker npm ci fails
+Already fixed — the frontend Dockerfile uses `npm install`, not `npm ci`.
+
+### OIDC auth fails
+Check GitHub → Settings → Secrets and variables → Actions → ensure federated credentials on the Entra app match your repo/branch/environment.
+
+---
+
+## ✅ Deployment Checklist
+
+- [ ] Fabric F-capacity GUID obtained
+- [ ] Service principal has Contributor on the capacity
+- [ ] Fabric tenant settings enabled for service principals
+- [ ] GitHub OIDC configured
+- [ ] Workflow ran successfully (no red steps)
+- [ ] Backend `/health` returns `{"status":"healthy"}`
+- [ ] Chat responds to "Top 5 customers by LifetimeValue"
+- [ ] (Optional) Power BI report embedded in right panel
