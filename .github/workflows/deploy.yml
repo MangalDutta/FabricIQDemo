@@ -140,8 +140,35 @@ jobs:
                 echo "  [SKIP] Fabric capacity '$CAP_DISPLAY_NAME' already exists (ID: $CAP_ALREADY_EXISTS) - reusing it, skipping Bicep creation"
               else
                 FABRIC_PARAMS="fabricSku=${{ inputs.fabric_sku }}"
+
+                # Resolve the capacity admin to an Object ID.
+                # The Fabric RP requires the member to be an existing Entra ID
+                # user or service principal - passing an invalid UPN causes
+                # "All provided principals must be existing..." ARM error.
+                ADMIN_OID=""
                 if [ -n "${{ inputs.fabric_capacity_admin }}" ]; then
-                  FABRIC_PARAMS="$FABRIC_PARAMS fabricCapacityAdmins=[\"${{ inputs.fabric_capacity_admin }}\"]"
+                  echo "  Resolving capacity admin: ${{ inputs.fabric_capacity_admin }}"
+                  ADMIN_OID=$(az ad user show --id "${{ inputs.fabric_capacity_admin }}" --query id -o tsv 2>/dev/null || \
+                              az ad sp show  --id "${{ inputs.fabric_capacity_admin }}" --query id -o tsv 2>/dev/null || echo "")
+                  if [ -z "$ADMIN_OID" ]; then
+                    echo "  [ERROR] '${{ inputs.fabric_capacity_admin }}' was not found in Entra ID."
+                    echo "  Provide a valid UPN (user@domain.com) of an existing Entra ID user, or leave fabric_capacity_admin blank to use the deploying service principal."
+                    exit 1
+                  fi
+                  echo "  Admin resolved -> OID: $ADMIN_OID"
+                else
+                  # No admin supplied: fall back to the deploying service principal
+                  echo "  No fabric_capacity_admin set - using deploying service principal as capacity admin"
+                  ADMIN_OID=$(az ad sp show --id "${{ inputs.azure_client_id }}" --query id -o tsv 2>/dev/null || echo "")
+                  if [ -z "$ADMIN_OID" ]; then
+                    echo "  [WARN] Could not resolve deploying SP OID - fabricCapacityAdmins will be empty (may fail)"
+                  else
+                    echo "  Deploying SP OID: $ADMIN_OID"
+                  fi
+                fi
+
+                if [ -n "$ADMIN_OID" ]; then
+                  FABRIC_PARAMS="$FABRIC_PARAMS fabricCapacityAdmins=[\"$ADMIN_OID\"]"
                 fi
                 echo "  [NEW] Provisioning Fabric capacity SKU: ${{ inputs.fabric_sku }}"
               fi
