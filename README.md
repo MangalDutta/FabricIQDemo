@@ -5,6 +5,28 @@
 
 ---
 
+## ⚡ One-Click Deploy
+
+[![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml)
+
+> Click the button above → **"Run workflow"** → Fill in the inputs → Click **"Run workflow"** again.
+> Full deployment (infra + Fabric + Docker + App Service) completes in ~10 minutes.
+
+**Minimum required inputs:**
+
+| Input | Where to find it |
+|---|---|
+| `azure_subscription_id` | Azure Portal → Subscriptions |
+| `azure_tenant_id` | Azure Portal → Microsoft Entra ID → Overview |
+| `azure_client_id` | Entra ID → App registrations → your app → Application (client) ID |
+| `resource_group` | Any name, e.g. `rg-customer360-demo` |
+| `workspace_name` | Pick any name for your Fabric workspace |
+| `fabric_capacity_id` | Fabric Admin Portal → Capacity settings → copy GUID |
+
+All other inputs have sensible defaults — leave them as-is.
+
+---
+
 ## 🎯 What This Is
 
 A fully automated, one-click deployment that delivers a **Customer 360 Conversational AI Platform** built entirely on **Microsoft Fabric** — no Azure AI Foundry required.
