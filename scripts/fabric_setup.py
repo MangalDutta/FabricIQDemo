@@ -120,8 +120,65 @@ def poll_operation(operation_id: str, token: str, description: str = "operation"
 # ─── Workspace ───────────────────────────────────────────────────────────────
 
 def list_workspaces(token: str) -> List[Dict[str, Any]]:
-    resp = fabric_request("GET", "/workspaces", token)
-    return resp.json().get("value", []) or []
+    """List all workspaces accessible to the caller, handling pagination."""
+    all_workspaces: List[Dict[str, Any]] = []
+    url = f"{FABRIC_BASE_URL}/workspaces"
+    headers = {"Authorization": f"Bearer {token}"}
+
+    while url:
+        resp = requests.get(url, headers=headers, timeout=30)
+        if not resp.ok:
+            print(f"   ⚠️  Workspace list failed [{resp.status_code}]: {resp.text[:200]}")
+            break
+        data = resp.json()
+        all_workspaces.extend(data.get("value", []) or [])
+        # Handle pagination via continuationToken or @odata.nextLink
+        continuation = data.get("continuationToken") or data.get("continuationUri")
+        next_link = data.get("@odata.nextLink")
+        if continuation and not next_link:
+            url = f"{FABRIC_BASE_URL}/workspaces?continuationToken={continuation}"
+        elif next_link:
+            url = next_link
+        else:
+            url = None
+
+    return all_workspaces
+
+
+def find_workspace_by_name_admin(workspace_name: str, token: str) -> Optional[str]:
+    """
+    Try the Admin API to find a workspace by name.
+    This works even if the SP is not a member of the workspace.
+    Requires Fabric Admin permissions on the service principal.
+    """
+    try:
+        resp = requests.get(
+            f"{FABRIC_BASE_URL}/admin/workspaces",
+            headers={"Authorization": f"Bearer {token}"},
+            params={"nameContains": workspace_name},
+            timeout=30,
+        )
+        if resp.ok:
+            for ws in resp.json().get("workspaces", []) or []:
+                if ws.get("name") == workspace_name or ws.get("displayName") == workspace_name:
+                    return ws.get("id")
+    except Exception as exc:
+        print(f"   Admin workspace lookup failed (non-fatal): {exc}")
+    return None
+
+
+def _assign_capacity(ws_id: str, capacity_id: str, token: str) -> None:
+    """Assign workspace to a Fabric capacity, ignoring errors gracefully."""
+    try:
+        fabric_request(
+            "POST",
+            f"/workspaces/{ws_id}/assignToCapacity",
+            token,
+            json={"capacityId": capacity_id},
+        )
+        print("   ✓ Workspace assigned to Fabric capacity!")
+    except Exception as exc:
+        print(f"   ⚠️  Capacity assignment failed (non-fatal): {exc}")
 
 
 def get_or_create_workspace(
@@ -130,46 +187,73 @@ def get_or_create_workspace(
     token: str,
 ) -> str:
     print(f"🔍 Looking for workspace: {workspace_name}")
-    workspaces = list_workspaces(token)
 
+    # --- Pass 1: list workspaces the SP has access to (with pagination) ---
+    workspaces = list_workspaces(token)
     for ws in workspaces:
         if ws.get("displayName") == workspace_name:
             ws_id = ws["id"]
-            print(f"✓ Found existing workspace: {workspace_name} (ID: {ws_id})")
-            current_capacity = ws.get("capacityId")
-            if current_capacity:
-                print(f"   Current capacityId: {current_capacity}")
-            else:
-                print("   ⚠️  No capacity assigned")
-
-            if capacity_id and (
-                not current_capacity or current_capacity.lower() != capacity_id.lower()
-            ):
-                print(f"🔄 Re-assigning to capacityId: {capacity_id}")
-                fabric_request(
-                    "POST",
-                    f"/workspaces/{ws_id}/assignToCapacity",
-                    token,
-                    json={"capacityId": capacity_id},
-                )
-                print("✓ Workspace re-assigned to Fabric capacity!")
-            elif capacity_id:
-                print("   ✓ Already assigned to correct capacity")
+            print(f"   ✓ Found existing workspace: {workspace_name} (ID: {ws_id})")
+            current_capacity = ws.get("capacityId", "")
+            if capacity_id and (not current_capacity or current_capacity.lower() != capacity_id.lower()):
+                print(f"   Reassigning to capacityId: {capacity_id}")
+                _assign_capacity(ws_id, capacity_id, token)
             return ws_id
 
-    print(f"📦 Workspace not found. Creating: {workspace_name}")
+    # --- Pass 2: try creating, handle 409 (already exists) gracefully ---
+    print(f"   Workspace not found in listing. Attempting to create: {workspace_name}")
     payload: Dict[str, Any] = {"displayName": workspace_name}
     if capacity_id:
         payload["capacityId"] = capacity_id
 
-    resp = fabric_request("POST", "/workspaces", token, json=payload)
-    location = resp.headers.get("Location", "")
-    if not location:
-        raise RuntimeError("Workspace created but Location header missing")
+    create_resp = requests.post(
+        f"{FABRIC_BASE_URL}/workspaces",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=60,
+    )
 
-    workspace_id = urlparse(location).path.rstrip("/").split("/")[-1]
-    print(f"✓ Created workspace: {workspace_name} (ID: {workspace_id})")
-    return workspace_id
+    if create_resp.status_code in (200, 201):
+        location = create_resp.headers.get("Location", "")
+        workspace_id = urlparse(location).path.rstrip("/").split("/")[-1] if location else ""
+        if not workspace_id:
+            workspace_id = create_resp.json().get("id", "")
+        print(f"   ✓ Created workspace: {workspace_name} (ID: {workspace_id})")
+        return workspace_id
+
+    if create_resp.status_code == 409:
+        # Workspace already exists but SP isn't a member — try to find it
+        print(f"   Workspace '{workspace_name}' already exists (409). Searching via Admin API...")
+        ws_id = find_workspace_by_name_admin(workspace_name, token)
+        if ws_id:
+            print(f"   ✓ Found via Admin API: {workspace_name} (ID: {ws_id})")
+            if capacity_id:
+                _assign_capacity(ws_id, capacity_id, token)
+            return ws_id
+
+        # Last resort: add SP as member then re-list
+        print("   Admin API did not find workspace. Re-listing after short wait...")
+        time.sleep(5)
+        workspaces2 = list_workspaces(token)
+        for ws in workspaces2:
+            if ws.get("displayName") == workspace_name:
+                ws_id = ws["id"]
+                print(f"   ✓ Found on retry: {workspace_name} (ID: {ws_id})")
+                if capacity_id:
+                    _assign_capacity(ws_id, capacity_id, token)
+                return ws_id
+
+        raise RuntimeError(
+            f"Workspace '{workspace_name}' exists (409) but could not be located.\n"
+            f"Please add the service principal as a Workspace Member/Admin in the Fabric portal\n"
+            f"(Workspace '{workspace_name}' -> Manage access -> Add your SP by client ID),\n"
+            f"then re-run the workflow."
+        )
+
+    # Any other error - surface it
+    raise RuntimeError(
+        f"Workspace creation failed [{create_resp.status_code}]: {create_resp.text[:300]}"
+    )
 
 
 # ─── Lakehouse ────────────────────────────────────────────────────────────────
