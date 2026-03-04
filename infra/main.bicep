@@ -106,6 +106,9 @@ output frontendAppName string = appServices.outputs.frontendAppName
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsId
 output vnetId string = enablePrivateEndpoints ? networking.outputs.vnetId : ''
 
-// Fabric capacity outputs — empty strings when fabricSku is not set
-output fabricCapacityId string = !empty(fabricSku) ? fabricCapacity.outputs.capacityFabricId : ''
-output fabricCapacityName string = !empty(fabricSku) ? fabricCapacity.outputs.capacityName : ''
+// Fabric capacity output — empty string when fabricSku is not set.
+// Uses null-conditional ?.  to avoid BCP318 on the conditional module reference.
+// The Fabric capacity GUID for workspace assignment is NOT available here;
+// it is looked up via the Fabric REST API in the deploy workflow after this
+// Bicep deployment completes (GET /v1/capacities, match on displayName).
+output fabricCapacityName string = fabricCapacity.?outputs.capacityName ?? ''
