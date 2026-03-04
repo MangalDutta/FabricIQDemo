@@ -61,7 +61,7 @@ module acr 'modules/acr.bicep' = {
     env: env
     location: location
     acrSku: 'Basic'
-    privateEndpointSubnetId: enablePrivateEndpoints ? networking.outputs.privateEndpointSubnetId : ''
+    privateEndpointSubnetId: networking.?outputs.privateEndpointSubnetId ?? ''
   }
 }
 
@@ -71,7 +71,7 @@ module keyVault 'modules/keyvault.bicep' = {
     baseName: baseName
     env: env
     location: location
-    privateEndpointSubnetId: enablePrivateEndpoints ? networking.outputs.privateEndpointSubnetId : ''
+    privateEndpointSubnetId: networking.?outputs.privateEndpointSubnetId ?? ''
   }
 }
 
@@ -104,7 +104,7 @@ output keyVaultName string = keyVault.outputs.keyVaultName
 output backendAppName string = appServices.outputs.backendAppName
 output frontendAppName string = appServices.outputs.frontendAppName
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsId
-output vnetId string = enablePrivateEndpoints ? networking.outputs.vnetId : ''
+output vnetId string = networking.?outputs.vnetId ?? ''
 
 // Fabric capacity output — empty string when fabricSku is not set.
 // Uses null-conditional ?.  to avoid BCP318 on the conditional module reference.

@@ -120,17 +120,34 @@ jobs:
 
             echo "Deploying Bicep infrastructure..."
 
-            # Build optional Fabric capacity parameters
+            # Build optional Fabric capacity parameters.
+            # Pre-check: if the capacity already exists (e.g. from a previous run),
+            # skip the fabricSku param so Bicep does not try to re-create it and
+            # hit a globally-unique name conflict in the Fabric RP.
             FABRIC_PARAMS=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              FABRIC_PARAMS="fabricSku=${{ inputs.fabric_sku }}"
-              if [ -n "${{ inputs.fabric_capacity_admin }}" ]; then
-                FABRIC_PARAMS="$FABRIC_PARAMS fabricCapacityAdmins=[\"${{ inputs.fabric_capacity_admin }}\"]"
+              CAP_DISPLAY_NAME="cap-$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]')-$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]')"
+              FABRIC_TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv 2>/dev/null || true)
+              CAP_ALREADY_EXISTS=""
+              if [ -n "$FABRIC_TOKEN" ]; then
+                CAP_ALREADY_EXISTS=$(curl -sf \
+                  -H "Authorization: Bearer $FABRIC_TOKEN" \
+                  "https://api.fabric.microsoft.com/v1/capacities" \
+                  | python3 -c "import sys,json;d=json.load(sys.stdin);t='$CAP_DISPLAY_NAME'.lower();print(next((c['id'] for c in d.get('value',[]) if c.get('displayName','').lower()==t),''))" 2>/dev/null || true)
               fi
-              echo "  Provisioning Fabric capacity SKU: ${{ inputs.fabric_sku }}"
+
+              if [ -n "$CAP_ALREADY_EXISTS" ]; then
+                echo "  [SKIP] Fabric capacity '$CAP_DISPLAY_NAME' already exists (ID: $CAP_ALREADY_EXISTS) - reusing it, skipping Bicep creation"
+              else
+                FABRIC_PARAMS="fabricSku=${{ inputs.fabric_sku }}"
+                if [ -n "${{ inputs.fabric_capacity_admin }}" ]; then
+                  FABRIC_PARAMS="$FABRIC_PARAMS fabricCapacityAdmins=[\"${{ inputs.fabric_capacity_admin }}\"]"
+                fi
+                echo "  [NEW] Provisioning Fabric capacity SKU: ${{ inputs.fabric_sku }}"
+              fi
             fi
 
-            az deployment group create \
+            if ! az deployment group create \
               --name "customer360-infra" \
               --resource-group "${{ inputs.resource_group }}" \
               --template-file infra/main.bicep \
@@ -139,7 +156,15 @@ jobs:
                 env="${{ inputs.environment }}" \
                 location="${{ inputs.location }}" \
                 $FABRIC_PARAMS \
-              --output table
+              --output table; then
+              echo "Bicep deployment failed. Fetching ARM operation details..."
+              az deployment operation group list \
+                --resource-group "${{ inputs.resource_group }}" \
+                --name "customer360-infra" \
+                --query "[?properties.provisioningState=='Failed'].{resource:properties.targetResource.resourceType,error:properties.statusMessage}" \
+                -o json 2>/dev/null || true
+              exit 1
+            fi
             echo "Infrastructure deployment complete"
 
       # --- Step 2: Collect infra outputs ---
