@@ -116,7 +116,7 @@ Fill in the inputs:
 | `azure_subscription_id` | `xxxxxxxx-...` | Your Azure sub ID |
 | `azure_tenant_id` | `xxxxxxxx-...` | Your Entra tenant ID |
 | `azure_client_id` | `xxxxxxxx-...` | OIDC app client ID |
-| `resource_group` | `rg-customer360-demo` | Created if absent |
+| `resource_group` | `xxxxxxxx` | Created if absent |
 | `location` | `centralindia` | Azure region |
 | `workspace_name` | `fabricagentdemo` | Fabric workspace name |
 | `fabric_capacity_id` | `44BF8C5D-...` | F-capacity GUID |
@@ -129,8 +129,8 @@ Fill in the inputs:
 After the workflow completes (~10 minutes), check:
 
 ```
-Frontend: https://app-cust360-frontend-dev.azurewebsites.net
-Backend:  https://app-cust360-backend-dev.azurewebsites.net/health  → {"status":"healthy"}
+Frontend: https://xxxxxxxxxxxxxxxxxx.azurewebsites.net
+Backend:  https://xxxxxxxxxxxxxxxxxx.azurewebsites.net/health  → {"status":"healthy"}
 ```
 
 Try a chat message — the app should respond with real customer data from the Fabric Data Agent.
@@ -305,3 +305,4 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Backend `/health` returns `{"status":"healthy"}`
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] (Optional) Power BI report embedded in right panel
+
