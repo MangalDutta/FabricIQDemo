@@ -24,7 +24,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' = {
     name: acrSku
   }
   properties: {
-    adminUserEnabled: false
+    adminUserEnabled: true
     publicNetworkAccess: privateEndpointSubnetId != '' ? 'Disabled' : 'Enabled'
   }
 }
