@@ -1,11 +1,1001 @@
 CustomerId,FullName,State,City,Segment,LifetimeValue,MonthlyRevenue,ChurnRiskScore,LastPurchaseDate
-CUST-0001,Anita Rao,Karnataka,Bengaluru,Enterprise,150000,25000,0.12,2025-12-15
-CUST-0002,Rahul Sharma,Maharashtra,Mumbai,SMB,90000,12000,0.35,2025-11-20
-CUST-0003,Leena Nair,Maharashtra,Pune,MidMarket,120000,18000,0.22,2025-12-30
-CUST-0004,Sanjay Iyer,Karnataka,Mysuru,SMB,45000,6000,0.48,2025-10-05
-CUST-0005,Priya Menon,Tamil Nadu,Chennai,Enterprise,200000,32000,0.08,2026-01-10
-CUST-0006,Amit Patel,Gujarat,Ahmedabad,MidMarket,85000,14000,0.19,2025-12-01
-CUST-0007,Deepa Kumar,Karnataka,Bengaluru,Enterprise,175000,28000,0.10,2026-01-15
-CUST-0008,Rajesh Gupta,Maharashtra,Mumbai,SMB,55000,8000,0.42,2025-11-10
-CUST-0009,Kavita Singh,Delhi,New Delhi,MidMarket,95000,15000,0.25,2025-12-20
-CUST-0010,Vijay Reddy,Telangana,Hyderabad,Enterprise,180000,30000,0.09,2026-01-05
+CUST-0001,Pallavi Gupta,Maharashtra,Nagpur,MidMarket,63953.79,9229.94,0.32,2025-04-26
+CUST-0002,Amit Naidu,Gujarat,Ahmedabad,Enterprise,193064.36,42090.84,0.15,2025-03-04
+CUST-0003,Jyoti Hegde,Gujarat,Rajkot,SMB,68565.83,3058.49,0.52,2025-02-07
+CUST-0004,Ramesh Bose,Karnataka,Mysuru,Startup,16780.81,1556.48,0.35,2025-08-07
+CUST-0005,Geeta Pandey,West Bengal,Asansol,SMB,78386.95,6406.81,0.42,2025-03-15
+CUST-0006,Sunil Mukherjee,Telangana,Hyderabad,Enterprise,191159.31,28022.46,0.05,2025-10-03
+CUST-0007,Deepa Chatterjee,Karnataka,Hubli,Enterprise,242108.28,45157.88,0.18,2025-02-15
+CUST-0008,Ashok Menon,Telangana,Warangal,SMB,34688.66,7160.34,0.31,2025-03-09
+CUST-0009,Jyoti Gowda,Karnataka,Hubli,SMB,66559.99,5061.43,0.21,2025-08-22
+CUST-0010,Dinesh Mishra,Maharashtra,Aurangabad,Startup,16013.73,4932.63,0.5,2025-03-07
+CUST-0011,Mahesh Reddy,Karnataka,Mysuru,SMB,52338.64,9723.12,0.37,2025-04-07
+CUST-0012,Dinesh Mukherjee,Karnataka,Mysuru,SMB,25454.56,3424.05,0.24,2025-03-15
+CUST-0013,Sunita Agarwal,Gujarat,Ahmedabad,MidMarket,109588.84,13616.6,0.18,2025-04-22
+CUST-0014,Anita Agarwal,Rajasthan,Ajmer,SMB,66115.92,6061.58,0.32,2025-11-11
+CUST-0015,Mahesh Rao,Uttar Pradesh,Agra,Startup,31668.68,4046.09,0.35,2025-03-16
+CUST-0016,Kiran Patil,Delhi,Dwarka,Enterprise,405004.32,39272.06,0.2,2025-05-04
+CUST-0017,Anita Raju,Tamil Nadu,Chennai,Enterprise,245192.31,59339.46,0.21,2025-09-30
+CUST-0018,Sanjay Tiwari,West Bengal,Kolkata,Enterprise,294396.19,18114.56,0.2,2025-11-27
+CUST-0019,Kavita Jain,Gujarat,Bhavnagar,Enterprise,311069.51,42296.73,0.24,2025-04-29
+CUST-0020,Lata Malhotra,Rajasthan,Udaipur,MidMarket,117168.7,12481.05,0.37,2025-06-13
+CUST-0021,Rajesh Tiwari,Karnataka,Hubli,Enterprise,321568.61,41479.81,0.03,2025-02-02
+CUST-0022,Pallavi Iyer,Karnataka,Bengaluru,Startup,7480.01,2428.03,0.63,2025-10-13
+CUST-0023,Divya Singh,Rajasthan,Ajmer,SMB,34579.83,7256.76,0.36,2025-12-13
+CUST-0024,Deepa Jain,Gujarat,Rajkot,MidMarket,136383.67,8650.05,0.3,2025-03-06
+CUST-0025,Deepa Iyer,Gujarat,Vadodara,SMB,26556.14,4724.31,0.41,2025-11-20
+CUST-0026,Ramesh Joshi,Karnataka,Mysuru,Startup,7638.47,5848.13,0.73,2025-12-11
+CUST-0027,Sanjay Kulkarni,Uttar Pradesh,Lucknow,Startup,37422.84,6092.17,0.38,2025-05-27
+CUST-0028,Shruti Mehta,West Bengal,Kolkata,Enterprise,100862.15,32568.98,0.23,2025-06-12
+CUST-0029,Swati Sen,Rajasthan,Ajmer,SMB,49200.28,4709.08,0.29,2026-01-01
+CUST-0030,Manoj Bhatia,Delhi,Rohini,Enterprise,333671.04,37628.27,0.22,2025-11-11
+CUST-0031,Sanjay Kamath,Maharashtra,Pune,Enterprise,127184.35,53781.86,0.12,2025-04-14
+CUST-0032,Suresh Naidu,Telangana,Khammam,Enterprise,362949.27,40435.21,0.1,2025-09-19
+CUST-0033,Arjun Jain,Rajasthan,Jodhpur,MidMarket,63087.83,15746.01,0.24,2025-12-24
+CUST-0034,Anita Basu,Telangana,Khammam,Startup,7564.13,2278.93,0.43,2025-08-05
+CUST-0035,Priya Tiwari,Tamil Nadu,Coimbatore,MidMarket,104321.8,11630.21,0.4,2025-03-02
+CUST-0036,Ganesh Rao,Rajasthan,Ajmer,MidMarket,116338.87,19267.16,0.14,2025-12-02
+CUST-0037,Deepa Bhatia,Delhi,Rohini,MidMarket,71062.97,12114.56,0.31,2025-09-17
+CUST-0038,Usha Nambiar,Karnataka,Bengaluru,Enterprise,269430.31,27450.61,0.03,2025-11-25
+CUST-0039,Pallavi Pandey,Maharashtra,Nashik,SMB,45661.22,3087.03,0.23,2025-02-11
+CUST-0040,Vijay Hegde,Maharashtra,Nagpur,SMB,28885.63,4147.01,0.32,2026-01-10
+CUST-0041,Anjali Mehta,Rajasthan,Jaipur,MidMarket,105988.35,18496.55,0.39,2025-11-12
+CUST-0042,Suresh Shah,Uttar Pradesh,Kanpur,Startup,5867.52,5419.39,0.47,2025-07-04
+CUST-0043,Nisha Bhatia,West Bengal,Durgapur,Enterprise,380511.28,32214.38,0.04,2025-06-04
+CUST-0044,Meena Desai,West Bengal,Asansol,MidMarket,132053.64,18455.88,0.17,2025-02-27
+CUST-0045,Pooja Banerjee,Tamil Nadu,Chennai,Startup,14769.37,4848.89,0.5,2025-05-01
+CUST-0046,Vikram Sharma,Maharashtra,Nagpur,Enterprise,485013.73,26945.99,0.05,2025-06-22
+CUST-0047,Anjali Malhotra,Punjab,Jalandhar,SMB,50685.38,6466.76,0.43,2025-09-22
+CUST-0048,Leena Kapoor,Gujarat,Bhavnagar,Startup,23845.82,5316.58,0.67,2025-02-21
+CUST-0049,Pooja Mukherjee,Gujarat,Vadodara,SMB,59803.25,4121.63,0.56,2025-05-16
+CUST-0050,Kiran Jain,Gujarat,Rajkot,SMB,53264.75,4726.56,0.47,2025-07-20
+CUST-0051,Vinod Bhatia,Uttar Pradesh,Meerut,SMB,44364.51,10503.53,0.32,2025-10-15
+CUST-0052,Ramesh Naidu,Telangana,Nizamabad,MidMarket,94215.98,10564.42,0.24,2025-11-05
+CUST-0053,Nisha Patel,Karnataka,Belagavi,MidMarket,131842.35,17013.66,0.3,2025-10-07
+CUST-0054,Pooja Reddy,Maharashtra,Pune,Startup,26394.59,5610.94,0.53,2025-03-14
+CUST-0055,Seema Desai,Rajasthan,Kota,MidMarket,74398.44,15872.7,0.1,2025-12-07
+CUST-0056,Naresh Sen,Karnataka,Belagavi,MidMarket,105740.58,19009.64,0.14,2025-11-23
+CUST-0057,Mahesh Jain,Delhi,Laxmi Nagar,SMB,77002.38,11022.83,0.45,2025-05-17
+CUST-0058,Ramesh Gowda,Gujarat,Surat,SMB,48480.47,5332.72,0.3,2025-03-10
+CUST-0059,Arun Arora,Punjab,Jalandhar,SMB,36475.85,3697.35,0.31,2025-09-13
+CUST-0060,Vikram Das,Uttar Pradesh,Lucknow,Enterprise,192504.59,46227.74,0.19,2025-12-29
+CUST-0061,Poonam Biswas,Tamil Nadu,Salem,MidMarket,70683.44,13041.72,0.37,2025-04-06
+CUST-0062,Jyoti Sharma,West Bengal,Siliguri,MidMarket,50589.61,12221.11,0.33,2025-06-30
+CUST-0063,Divya Bhatia,Punjab,Patiala,Startup,22088.03,2637.61,0.54,2025-07-15
+CUST-0064,Vikram Jain,Rajasthan,Kota,SMB,70430.34,11275.87,0.59,2025-05-02
+CUST-0065,Rahul Banerjee,Telangana,Hyderabad,Enterprise,271445.11,54008.31,0.07,2025-09-19
+CUST-0066,Rekha Das,Karnataka,Hubli,MidMarket,137964.0,11339.08,0.39,2025-06-29
+CUST-0067,Rina Patel,Gujarat,Bhavnagar,Enterprise,480767.88,25090.0,0.05,2025-03-03
+CUST-0068,Leena Chopra,Maharashtra,Pune,Enterprise,108152.01,21857.21,0.06,2025-02-22
+CUST-0069,Rajesh Murthy,Uttar Pradesh,Varanasi,SMB,66013.89,4510.1,0.44,2025-12-03
+CUST-0070,Naresh Shah,Uttar Pradesh,Lucknow,SMB,75733.23,8182.17,0.56,2025-07-22
+CUST-0071,Dinesh Kapoor,Karnataka,Belagavi,SMB,57634.54,3917.11,0.51,2025-02-14
+CUST-0072,Geeta Gupta,West Bengal,Siliguri,SMB,40832.23,6855.4,0.35,2025-05-16
+CUST-0073,Ashok Bose,Maharashtra,Nashik,SMB,26332.33,11647.09,0.45,2025-06-09
+CUST-0074,Harish Reddy,Gujarat,Bhavnagar,Startup,14452.88,5849.2,0.57,2025-05-28
+CUST-0075,Mahesh Sen,West Bengal,Siliguri,MidMarket,135171.32,17968.77,0.13,2025-06-14
+CUST-0076,Suresh Chopra,Gujarat,Bhavnagar,SMB,40183.8,7448.76,0.33,2025-05-26
+CUST-0077,Arjun Roy,West Bengal,Durgapur,MidMarket,109615.5,18561.29,0.27,2025-05-11
+CUST-0078,Pooja Patel,Karnataka,Mangaluru,MidMarket,125816.47,16287.31,0.29,2025-05-24
+CUST-0079,Smita Sharma,Maharashtra,Pune,MidMarket,74330.52,15967.52,0.21,2025-04-22
+CUST-0080,Ganesh Roy,Gujarat,Bhavnagar,MidMarket,120285.49,11251.0,0.18,2025-11-30
+CUST-0081,Shweta Desai,Tamil Nadu,Tiruchirappalli,Startup,29155.72,2149.25,0.67,2025-09-11
+CUST-0082,Shweta Naidu,Uttar Pradesh,Meerut,SMB,78830.64,10493.66,0.32,2025-07-30
+CUST-0083,Mohan Ghosh,Maharashtra,Aurangabad,Enterprise,118206.28,17453.67,0.09,2025-11-27
+CUST-0084,Pallavi Chopra,Delhi,New Delhi,SMB,48163.82,6964.22,0.27,2026-01-04
+CUST-0085,Rina Pillai,Maharashtra,Mumbai,MidMarket,57408.22,15553.35,0.12,2025-11-15
+CUST-0086,Seema Ghosh,Maharashtra,Pune,Enterprise,405777.38,42284.29,0.2,2025-10-07
+CUST-0087,Naresh Shetty,Tamil Nadu,Salem,MidMarket,108852.51,13145.96,0.27,2025-12-31
+CUST-0088,Sunil Bhatia,Maharashtra,Pune,SMB,35878.77,3730.69,0.3,2025-04-23
+CUST-0089,Priya Shah,Maharashtra,Nashik,SMB,48194.75,3293.76,0.32,2025-09-08
+CUST-0090,Jyoti Basu,Maharashtra,Pune,Startup,32573.98,4750.35,0.63,2025-10-21
+CUST-0091,Ramesh Gupta,Delhi,Dwarka,Startup,33932.09,1428.46,0.38,2025-08-26
+CUST-0092,Geeta Bhatia,West Bengal,Durgapur,MidMarket,96869.8,11649.09,0.22,2025-09-13
+CUST-0093,Usha Hegde,Delhi,New Delhi,SMB,73365.37,9610.81,0.44,2026-01-17
+CUST-0094,Amit Verma,Uttar Pradesh,Meerut,SMB,21244.73,9882.84,0.53,2025-04-10
+CUST-0095,Leena Chopra,Punjab,Jalandhar,SMB,46533.76,5503.41,0.6,2025-06-21
+CUST-0096,Pallavi Nambiar,Uttar Pradesh,Varanasi,MidMarket,83330.84,16041.6,0.36,2025-08-15
+CUST-0097,Poonam Saxena,Delhi,Janakpuri,SMB,53005.8,7093.43,0.33,2025-08-18
+CUST-0098,Rajesh Arora,Gujarat,Bhavnagar,SMB,20069.06,10824.31,0.38,2026-01-03
+CUST-0099,Pooja Shetty,Tamil Nadu,Salem,SMB,65599.43,4832.02,0.42,2025-09-05
+CUST-0100,Smita Saxena,Gujarat,Ahmedabad,Startup,26310.51,2435.78,0.38,2025-04-23
+CUST-0101,Anita Gowda,Gujarat,Surat,Startup,36952.55,3768.69,0.36,2025-11-13
+CUST-0102,Prakash Kapoor,Karnataka,Hubli,MidMarket,98249.96,13666.64,0.24,2025-11-17
+CUST-0103,Rekha Desai,Uttar Pradesh,Meerut,SMB,28190.5,3628.29,0.51,2025-07-02
+CUST-0104,Vikram Kamath,Karnataka,Bengaluru,MidMarket,79855.58,15043.25,0.4,2025-05-25
+CUST-0105,Vijay Dey,Delhi,Rohini,MidMarket,126287.27,12526.52,0.38,2025-10-26
+CUST-0106,Jyoti Tiwari,Telangana,Warangal,Startup,19377.13,2909.06,0.54,2025-07-19
+CUST-0107,Rekha Jain,Punjab,Ludhiana,MidMarket,53701.96,14027.49,0.28,2025-12-10
+CUST-0108,Smita Kumar,Delhi,Janakpuri,Enterprise,157662.17,54191.98,0.24,2025-12-23
+CUST-0109,Shruti Pandey,Tamil Nadu,Salem,SMB,71105.92,10671.07,0.54,2025-07-20
+CUST-0110,Neha Patil,Rajasthan,Kota,Startup,6256.47,1410.52,0.62,2025-09-05
+CUST-0111,Meena Bhatia,Maharashtra,Mumbai,SMB,62233.45,3904.57,0.27,2025-08-30
+CUST-0112,Rahul Nair,Tamil Nadu,Chennai,MidMarket,87484.11,9746.84,0.26,2025-04-16
+CUST-0113,Vinod Joshi,Karnataka,Bengaluru,SMB,42952.66,9148.21,0.4,2025-04-07
+CUST-0114,Vijay Verma,Gujarat,Vadodara,MidMarket,116684.07,18786.9,0.24,2025-09-05
+CUST-0115,Vinod Hegde,Maharashtra,Nashik,Startup,39567.81,2794.93,0.78,2025-02-11
+CUST-0116,Rina Basu,West Bengal,Howrah,Startup,34866.74,1639.92,0.49,2025-07-31
+CUST-0117,Seema Sinha,Uttar Pradesh,Agra,Enterprise,432015.02,32811.26,0.03,2025-02-13
+CUST-0118,Naresh Bhatia,Uttar Pradesh,Meerut,SMB,69970.33,11126.41,0.51,2025-10-05
+CUST-0119,Geeta Roy,Karnataka,Mysuru,SMB,60665.87,9488.36,0.46,2025-11-21
+CUST-0120,Pallavi Kumar,Uttar Pradesh,Lucknow,MidMarket,94082.32,14954.89,0.32,2025-12-15
+CUST-0121,Swati Das,Punjab,Ludhiana,MidMarket,128651.28,18517.53,0.21,2025-05-19
+CUST-0122,Arun Shah,Karnataka,Mangaluru,Startup,15329.95,6222.38,0.7,2025-06-05
+CUST-0123,Priya Reddy,Punjab,Ludhiana,Startup,30347.58,6879.65,0.78,2025-04-20
+CUST-0124,Nikhil Patel,Punjab,Chandigarh,MidMarket,62358.87,12423.03,0.32,2025-09-18
+CUST-0125,Manoj Chatterjee,West Bengal,Durgapur,Enterprise,193528.76,16126.11,0.22,2025-04-18
+CUST-0126,Neha Prasad,Karnataka,Bengaluru,SMB,47856.05,9309.69,0.46,2025-12-02
+CUST-0127,Kavita Nair,Uttar Pradesh,Agra,Startup,9064.22,2408.8,0.57,2025-07-16
+CUST-0128,Mahesh Mukherjee,Rajasthan,Ajmer,MidMarket,124226.9,9854.27,0.22,2025-12-11
+CUST-0129,Prakash Prasad,Gujarat,Vadodara,Enterprise,248211.98,34952.24,0.24,2025-07-29
+CUST-0130,Deepa Agarwal,Tamil Nadu,Madurai,Enterprise,210352.58,58569.31,0.24,2025-06-12
+CUST-0131,Amit Jain,Karnataka,Belagavi,Startup,6770.25,3001.05,0.79,2025-04-16
+CUST-0132,Arjun Menon,West Bengal,Siliguri,MidMarket,71595.14,18436.35,0.2,2025-11-16
+CUST-0133,Geeta Rao,Karnataka,Mysuru,Startup,23907.54,5791.08,0.35,2026-01-17
+CUST-0134,Kavita Rao,Tamil Nadu,Coimbatore,SMB,20946.87,5388.31,0.25,2025-06-29
+CUST-0135,Ganesh Gupta,Punjab,Jalandhar,MidMarket,86203.9,15123.99,0.24,2025-10-09
+CUST-0136,Sunil Nair,Rajasthan,Ajmer,MidMarket,114334.07,8373.81,0.4,2025-07-09
+CUST-0137,Ramesh Agarwal,Maharashtra,Nashik,Enterprise,132316.19,42373.38,0.04,2025-09-12
+CUST-0138,Sunil Patil,Telangana,Nizamabad,MidMarket,109739.19,11538.77,0.25,2025-06-24
+CUST-0139,Deepa Saxena,Maharashtra,Aurangabad,SMB,32901.38,7063.99,0.29,2025-08-10
+CUST-0140,Mahesh Banerjee,Gujarat,Ahmedabad,MidMarket,81252.36,11058.68,0.39,2025-02-13
+CUST-0141,Shruti Menon,Maharashtra,Mumbai,Enterprise,138625.77,48245.82,0.21,2025-04-21
+CUST-0142,Sanjay Naidu,Uttar Pradesh,Meerut,MidMarket,62223.13,12243.18,0.3,2025-06-28
+CUST-0143,Shweta Iyer,Uttar Pradesh,Meerut,MidMarket,60360.06,14088.95,0.15,2025-05-29
+CUST-0144,Meena Kumar,Tamil Nadu,Tiruchirappalli,MidMarket,126260.56,14889.2,0.34,2025-04-18
+CUST-0145,Naresh Prasad,Telangana,Khammam,Enterprise,471633.72,52325.74,0.09,2025-10-30
+CUST-0146,Arun Saxena,Punjab,Amritsar,MidMarket,68140.56,9719.02,0.3,2025-12-26
+CUST-0147,Vijay Bhatia,Telangana,Hyderabad,Enterprise,312193.08,31928.75,0.13,2025-11-11
+CUST-0148,Nikhil Ghosh,Rajasthan,Ajmer,SMB,73000.53,4400.22,0.5,2026-01-05
+CUST-0149,Vinod Patel,Karnataka,Mangaluru,MidMarket,94204.42,11278.0,0.33,2025-12-03
+CUST-0150,Anjali Sen,Maharashtra,Aurangabad,MidMarket,116713.26,8545.01,0.22,2025-03-30
+CUST-0151,Sanjay Rao,Karnataka,Mysuru,SMB,65849.65,5605.02,0.25,2025-05-21
+CUST-0152,Anil Sen,Karnataka,Mangaluru,SMB,33806.64,8028.51,0.47,2025-08-02
+CUST-0153,Priya Banerjee,West Bengal,Kolkata,MidMarket,95975.43,8934.35,0.19,2025-06-25
+CUST-0154,Seema Banerjee,Rajasthan,Kota,MidMarket,90503.23,19594.4,0.15,2025-03-20
+CUST-0155,Mahesh Saxena,Uttar Pradesh,Lucknow,MidMarket,60586.31,13228.12,0.22,2025-12-21
+CUST-0156,Dinesh Ghosh,Punjab,Ludhiana,MidMarket,66813.27,14125.8,0.13,2025-05-14
+CUST-0157,Pooja Arora,Tamil Nadu,Coimbatore,MidMarket,64644.42,10367.26,0.28,2025-03-01
+CUST-0158,Priya Joshi,Uttar Pradesh,Varanasi,MidMarket,106373.55,14953.62,0.3,2025-04-16
+CUST-0159,Ashok Patil,Uttar Pradesh,Agra,Startup,26952.61,1905.74,0.33,2025-06-18
+CUST-0160,Pallavi Ghosh,West Bengal,Siliguri,Enterprise,302934.75,28968.35,0.13,2026-01-01
+CUST-0161,Nikhil Sinha,Maharashtra,Mumbai,SMB,50424.07,7164.4,0.42,2026-01-09
+CUST-0162,Smita Murthy,Telangana,Nizamabad,SMB,50082.04,11619.5,0.38,2025-08-08
+CUST-0163,Harish Patel,Delhi,Dwarka,Enterprise,383048.68,59594.37,0.15,2025-03-24
+CUST-0164,Sunita Mukherjee,Tamil Nadu,Madurai,MidMarket,127446.48,16146.77,0.12,2025-03-13
+CUST-0165,Ashok Bose,Maharashtra,Mumbai,SMB,43193.85,5267.96,0.54,2025-03-28
+CUST-0166,Vijay Bose,Maharashtra,Pune,Startup,15858.11,4936.33,0.63,2025-11-25
+CUST-0167,Geeta Kapoor,Uttar Pradesh,Agra,SMB,58609.6,5956.29,0.25,2025-02-05
+CUST-0168,Anil Agarwal,Uttar Pradesh,Lucknow,SMB,45404.38,6256.45,0.35,2025-10-30
+CUST-0169,Arjun Bose,Uttar Pradesh,Varanasi,Enterprise,499990.65,21972.53,0.1,2025-12-10
+CUST-0170,Usha Arora,Delhi,Laxmi Nagar,Enterprise,234705.75,49483.84,0.06,2025-07-22
+CUST-0171,Vijay Shah,Karnataka,Belagavi,SMB,29932.35,6939.06,0.36,2025-02-18
+CUST-0172,Shweta Tiwari,Uttar Pradesh,Meerut,MidMarket,124853.65,13387.14,0.26,2025-08-25
+CUST-0173,Shruti Desai,Tamil Nadu,Tiruchirappalli,Startup,21158.8,2690.63,0.49,2025-05-05
+CUST-0174,Poonam Shah,West Bengal,Siliguri,Enterprise,200001.28,43853.06,0.22,2025-04-22
+CUST-0175,Deepa Kapoor,West Bengal,Kolkata,MidMarket,126311.68,11273.5,0.37,2025-11-16
+CUST-0176,Ramesh Patel,Uttar Pradesh,Kanpur,SMB,73077.79,11374.25,0.37,2025-07-12
+CUST-0177,Usha Mukherjee,Karnataka,Bengaluru,MidMarket,52818.75,19169.91,0.35,2025-03-04
+CUST-0178,Vikram Reddy,Maharashtra,Nagpur,Startup,21535.92,5986.66,0.68,2025-06-04
+CUST-0179,Smita Prasad,Maharashtra,Mumbai,Enterprise,186261.9,21728.38,0.24,2025-03-25
+CUST-0180,Ganesh Sen,Maharashtra,Nagpur,MidMarket,62184.83,10861.27,0.29,2025-03-18
+CUST-0181,Mahesh Menon,Maharashtra,Nashik,SMB,20986.12,7638.38,0.3,2025-11-18
+CUST-0182,Swati Sen,Maharashtra,Nagpur,MidMarket,91656.76,15972.46,0.13,2025-07-30
+CUST-0183,Priya Shetty,Delhi,Laxmi Nagar,SMB,43427.22,7231.22,0.45,2025-07-23
+CUST-0184,Rina Bhatia,Maharashtra,Mumbai,MidMarket,123294.1,15539.08,0.33,2025-08-13
+CUST-0185,Kavita Nair,Tamil Nadu,Madurai,SMB,30505.35,10012.28,0.39,2025-02-08
+CUST-0186,Shruti Patil,Karnataka,Mysuru,Enterprise,410476.16,35595.58,0.09,2026-01-08
+CUST-0187,Pooja Nair,Tamil Nadu,Madurai,SMB,79347.36,7887.28,0.3,2025-03-05
+CUST-0188,Pooja Sinha,Tamil Nadu,Chennai,Startup,16617.36,1746.85,0.48,2025-07-10
+CUST-0189,Anil Dey,Uttar Pradesh,Varanasi,MidMarket,68681.72,16304.82,0.21,2025-05-10
+CUST-0190,Arun Patel,Rajasthan,Jaipur,MidMarket,149509.82,10165.48,0.19,2025-12-09
+CUST-0191,Amit Das,Rajasthan,Udaipur,MidMarket,121766.29,9999.74,0.23,2025-06-16
+CUST-0192,Leena Malhotra,West Bengal,Durgapur,SMB,46096.43,8755.22,0.52,2026-01-01
+CUST-0193,Priya Jain,Telangana,Nizamabad,SMB,64993.88,4439.88,0.21,2025-03-25
+CUST-0194,Vinod Dey,Maharashtra,Mumbai,MidMarket,114516.29,12345.81,0.38,2026-01-14
+CUST-0195,Geeta Reddy,Rajasthan,Udaipur,MidMarket,126308.45,14887.06,0.26,2025-07-11
+CUST-0196,Neha Kulkarni,Karnataka,Bengaluru,Enterprise,174419.22,38298.54,0.23,2025-12-01
+CUST-0197,Rina Arora,Karnataka,Mangaluru,MidMarket,111187.72,16327.77,0.4,2025-10-20
+CUST-0198,Rajesh Singh,West Bengal,Asansol,Enterprise,385347.96,59876.81,0.21,2025-08-20
+CUST-0199,Nisha Roy,Rajasthan,Ajmer,SMB,73479.9,10662.26,0.48,2025-02-06
+CUST-0200,Pallavi Joshi,West Bengal,Siliguri,MidMarket,148513.25,17504.79,0.17,2025-05-23
+CUST-0201,Rahul Mukherjee,Delhi,Rohini,MidMarket,148301.2,9557.25,0.37,2025-12-28
+CUST-0202,Kiran Banerjee,Uttar Pradesh,Varanasi,SMB,66149.87,10410.05,0.23,2025-08-21
+CUST-0203,Ashok Menon,Gujarat,Bhavnagar,MidMarket,137796.02,17363.16,0.29,2025-10-29
+CUST-0204,Naresh Singh,Gujarat,Ahmedabad,SMB,51086.13,5737.12,0.26,2025-02-01
+CUST-0205,Meena Roy,Uttar Pradesh,Meerut,Startup,34607.68,2503.63,0.62,2025-04-23
+CUST-0206,Arun Singh,Telangana,Khammam,SMB,50154.39,4517.72,0.58,2025-11-13
+CUST-0207,Sunita Jain,Telangana,Khammam,MidMarket,142392.97,8494.33,0.36,2025-12-20
+CUST-0208,Leena Kulkarni,Punjab,Amritsar,SMB,66017.54,6749.28,0.46,2025-05-21
+CUST-0209,Pallavi Hegde,Karnataka,Hubli,MidMarket,130468.82,16219.89,0.19,2025-12-24
+CUST-0210,Jyoti Iyer,Maharashtra,Nashik,MidMarket,70402.3,15279.92,0.19,2025-08-20
+CUST-0211,Shweta Roy,Uttar Pradesh,Kanpur,SMB,50898.81,3955.66,0.3,2025-11-29
+CUST-0212,Arun Dey,Karnataka,Bengaluru,Enterprise,478153.96,53887.37,0.12,2025-11-10
+CUST-0213,Neha Murthy,Rajasthan,Jodhpur,SMB,49895.93,7632.52,0.4,2025-08-26
+CUST-0214,Prakash Sharma,Maharashtra,Nashik,SMB,78001.2,4936.3,0.34,2026-01-05
+CUST-0215,Swati Nambiar,Telangana,Karimnagar,MidMarket,50817.74,9289.97,0.14,2025-09-17
+CUST-0216,Shweta Mukherjee,Punjab,Amritsar,Enterprise,120463.07,40281.76,0.11,2025-09-05
+CUST-0217,Priya Chatterjee,Delhi,Laxmi Nagar,MidMarket,148909.07,16164.78,0.14,2025-12-12
+CUST-0218,Dinesh Mukherjee,West Bengal,Durgapur,SMB,41936.38,4298.41,0.44,2025-07-09
+CUST-0219,Usha Nair,Maharashtra,Pune,SMB,68237.95,7673.99,0.26,2025-05-12
+CUST-0220,Kavita Das,Uttar Pradesh,Agra,Enterprise,496246.3,48269.37,0.1,2025-08-11
+CUST-0221,Usha Kamath,Delhi,Laxmi Nagar,MidMarket,131574.88,12420.29,0.3,2025-07-01
+CUST-0222,Manoj Ghosh,West Bengal,Kolkata,SMB,35931.83,8900.32,0.59,2025-04-09
+CUST-0223,Seema Verma,Rajasthan,Ajmer,MidMarket,102423.23,16654.19,0.33,2025-07-20
+CUST-0224,Vijay Agarwal,Karnataka,Belagavi,Startup,8846.34,1113.62,0.46,2025-11-14
+CUST-0225,Poonam Saxena,Karnataka,Belagavi,SMB,75231.26,10855.36,0.49,2025-12-30
+CUST-0226,Harish Singh,Delhi,Laxmi Nagar,MidMarket,116222.68,14305.73,0.19,2025-11-03
+CUST-0227,Mahesh Hegde,Tamil Nadu,Madurai,SMB,72059.26,9126.71,0.52,2025-09-17
+CUST-0228,Sunil Pillai,Karnataka,Mysuru,MidMarket,79849.92,19297.83,0.39,2025-09-05
+CUST-0229,Harish Mehta,Rajasthan,Kota,MidMarket,84880.32,19204.4,0.34,2025-09-12
+CUST-0230,Swati Gupta,Telangana,Khammam,MidMarket,148016.05,17820.53,0.39,2025-11-17
+CUST-0231,Swati Nair,Karnataka,Bengaluru,MidMarket,94237.61,11077.33,0.24,2025-10-19
+CUST-0232,Divya Mishra,Uttar Pradesh,Agra,Enterprise,346270.81,41407.37,0.08,2025-02-22
+CUST-0233,Ganesh Verma,Telangana,Hyderabad,Enterprise,232117.45,36258.18,0.18,2025-11-21
+CUST-0234,Anita Gowda,Uttar Pradesh,Kanpur,MidMarket,143503.21,18540.8,0.24,2025-10-20
+CUST-0235,Lata Sinha,Tamil Nadu,Chennai,Startup,8131.13,4444.8,0.57,2026-01-11
+CUST-0236,Mohan Biswas,West Bengal,Howrah,Startup,6271.89,6017.22,0.69,2025-10-27
+CUST-0237,Anil Sinha,West Bengal,Kolkata,MidMarket,110278.3,19141.46,0.2,2025-06-12
+CUST-0238,Ashok Hegde,Delhi,Dwarka,Startup,21380.73,2156.87,0.36,2025-11-08
+CUST-0239,Shweta Basu,Telangana,Warangal,Enterprise,234844.87,28276.09,0.18,2025-10-24
+CUST-0240,Mohan Prasad,West Bengal,Asansol,SMB,50916.84,3780.64,0.47,2025-10-28
+CUST-0241,Kavita Pillai,Tamil Nadu,Coimbatore,Enterprise,253429.76,35103.1,0.09,2025-08-15
+CUST-0242,Kiran Naidu,Rajasthan,Jaipur,MidMarket,85955.21,10835.63,0.3,2025-06-06
+CUST-0243,Kiran Shah,Gujarat,Bhavnagar,Startup,36073.05,5619.05,0.65,2025-03-09
+CUST-0244,Swati Mukherjee,Telangana,Warangal,Startup,21736.37,3729.87,0.79,2025-07-23
+CUST-0245,Poonam Saxena,Delhi,Janakpuri,SMB,68119.7,10430.43,0.5,2025-02-16
+CUST-0246,Lata Raju,West Bengal,Kolkata,SMB,51690.39,6256.06,0.57,2025-12-04
+CUST-0247,Sanjay Gowda,Uttar Pradesh,Kanpur,SMB,28991.14,5953.06,0.41,2025-12-02
+CUST-0248,Vinod Mehta,Rajasthan,Kota,Enterprise,304150.14,51391.14,0.13,2025-05-13
+CUST-0249,Poonam Basu,Delhi,Laxmi Nagar,MidMarket,130691.54,16679.36,0.22,2026-01-29
+CUST-0250,Anil Mehta,Telangana,Hyderabad,MidMarket,120038.49,14493.96,0.12,2025-12-26
+CUST-0251,Shruti Nair,Karnataka,Mysuru,SMB,65949.66,11805.0,0.46,2025-06-29
+CUST-0252,Nikhil Chatterjee,Gujarat,Rajkot,MidMarket,118273.04,15941.51,0.26,2025-03-02
+CUST-0253,Anjali Gupta,Karnataka,Belagavi,MidMarket,62734.71,19744.69,0.35,2026-01-19
+CUST-0254,Kiran Basu,Rajasthan,Ajmer,MidMarket,87927.65,10755.97,0.24,2025-11-12
+CUST-0255,Arun Desai,Uttar Pradesh,Lucknow,Enterprise,364079.07,42671.54,0.24,2026-01-22
+CUST-0256,Suresh Mehta,Maharashtra,Aurangabad,Enterprise,339113.96,46647.88,0.04,2026-01-08
+CUST-0257,Dinesh Dey,Karnataka,Mysuru,SMB,66563.82,4261.22,0.6,2025-10-03
+CUST-0258,Shweta Murthy,Tamil Nadu,Tiruchirappalli,SMB,69102.95,5132.14,0.55,2025-02-26
+CUST-0259,Ganesh Verma,Gujarat,Vadodara,Enterprise,479408.1,54587.13,0.23,2025-03-16
+CUST-0260,Vinod Sen,Delhi,New Delhi,Startup,37955.52,5028.06,0.69,2025-08-20
+CUST-0261,Jyoti Biswas,Gujarat,Vadodara,MidMarket,125441.61,13682.23,0.35,2025-08-30
+CUST-0262,Harish Reddy,West Bengal,Kolkata,SMB,78067.17,8015.58,0.25,2025-09-28
+CUST-0263,Rina Mehta,Tamil Nadu,Chennai,Startup,34649.67,1554.78,0.66,2025-10-25
+CUST-0264,Sanjay Mishra,Tamil Nadu,Tiruchirappalli,SMB,72417.23,4693.47,0.5,2025-02-21
+CUST-0265,Ravi Mehta,Gujarat,Vadodara,MidMarket,140899.42,10541.69,0.16,2025-12-01
+CUST-0266,Anil Chopra,Gujarat,Surat,SMB,62226.11,6569.69,0.3,2025-08-19
+CUST-0267,Naresh Sinha,Tamil Nadu,Tiruchirappalli,SMB,38505.34,6236.8,0.55,2025-06-06
+CUST-0268,Deepa Malhotra,Gujarat,Vadodara,Startup,17974.67,3483.58,0.58,2025-10-09
+CUST-0269,Anil Reddy,Maharashtra,Aurangabad,Startup,25270.0,3505.47,0.38,2025-08-15
+CUST-0270,Meena Chatterjee,Telangana,Warangal,MidMarket,115460.8,16218.16,0.18,2025-05-25
+CUST-0271,Shweta Kulkarni,Punjab,Jalandhar,Enterprise,417990.21,22616.96,0.19,2025-05-25
+CUST-0272,Mohan Hegde,Uttar Pradesh,Lucknow,SMB,70344.11,3668.97,0.53,2026-01-06
+CUST-0273,Lata Rao,Gujarat,Surat,Enterprise,160411.86,24842.39,0.13,2025-12-31
+CUST-0274,Sunil Patil,Rajasthan,Ajmer,Startup,28074.95,1094.39,0.57,2025-07-04
+CUST-0275,Anita Sharma,Delhi,Rohini,SMB,37201.31,7519.94,0.48,2025-06-24
+CUST-0276,Mohan Kumar,Uttar Pradesh,Meerut,Enterprise,176772.82,38690.52,0.21,2025-09-16
+CUST-0277,Dinesh Patel,Tamil Nadu,Salem,MidMarket,74320.79,16366.84,0.19,2025-12-20
+CUST-0278,Ashok Kulkarni,Punjab,Chandigarh,MidMarket,87716.96,13712.06,0.29,2025-02-05
+CUST-0279,Sunita Patel,Delhi,Janakpuri,SMB,39876.24,11795.96,0.59,2025-05-05
+CUST-0280,Leena Verma,Karnataka,Belagavi,MidMarket,54656.2,8892.18,0.38,2025-04-27
+CUST-0281,Seema Jain,Maharashtra,Nagpur,Enterprise,182863.25,21488.62,0.21,2025-07-11
+CUST-0282,Priya Ghosh,Maharashtra,Pune,SMB,70966.55,9093.31,0.42,2025-07-18
+CUST-0283,Lata Bhatia,Maharashtra,Mumbai,SMB,78459.4,3483.27,0.37,2025-12-23
+CUST-0284,Vikram Raju,Punjab,Patiala,MidMarket,127355.49,8355.51,0.18,2025-06-14
+CUST-0285,Prakash Verma,Tamil Nadu,Salem,MidMarket,117969.49,15928.06,0.13,2025-03-20
+CUST-0286,Swati Tiwari,Rajasthan,Jaipur,MidMarket,88000.0,17406.68,0.15,2025-07-15
+CUST-0287,Neha Mukherjee,Maharashtra,Mumbai,Startup,20565.76,5568.08,0.35,2025-12-17
+CUST-0288,Mohan Sen,Gujarat,Bhavnagar,SMB,26197.58,3806.57,0.42,2025-03-31
+CUST-0289,Geeta Das,West Bengal,Kolkata,MidMarket,88779.96,9016.39,0.37,2025-09-28
+CUST-0290,Seema Shetty,Karnataka,Mangaluru,Enterprise,207567.59,27078.31,0.06,2025-11-06
+CUST-0291,Ramesh Mishra,Gujarat,Rajkot,SMB,41667.49,11498.0,0.49,2025-05-22
+CUST-0292,Geeta Prasad,Karnataka,Bengaluru,Enterprise,102706.95,32806.14,0.22,2025-07-20
+CUST-0293,Vikram Dey,Tamil Nadu,Tiruchirappalli,Enterprise,228266.06,57627.55,0.07,2025-08-23
+CUST-0294,Mohan Banerjee,Uttar Pradesh,Agra,SMB,57974.15,11709.87,0.51,2025-08-17
+CUST-0295,Rekha Mishra,West Bengal,Asansol,MidMarket,143206.72,10397.6,0.4,2025-10-30
+CUST-0296,Vinod Arora,Delhi,Janakpuri,Startup,12337.69,5786.11,0.72,2025-12-26
+CUST-0297,Poonam Agarwal,Delhi,Rohini,MidMarket,115866.3,16582.84,0.34,2025-12-24
+CUST-0298,Smita Raju,Gujarat,Rajkot,SMB,75409.75,10826.7,0.37,2026-01-12
+CUST-0299,Nikhil Saxena,Uttar Pradesh,Meerut,SMB,74864.07,3984.32,0.3,2025-02-24
+CUST-0300,Anjali Shah,Telangana,Hyderabad,SMB,58701.87,8820.69,0.59,2025-08-14
+CUST-0301,Ramesh Kumar,Maharashtra,Nagpur,MidMarket,124685.3,14695.92,0.31,2025-10-09
+CUST-0302,Smita Mukherjee,Tamil Nadu,Tiruchirappalli,SMB,29044.7,11979.32,0.39,2025-09-01
+CUST-0303,Poonam Patel,Maharashtra,Pune,MidMarket,84306.67,17411.24,0.26,2025-08-05
+CUST-0304,Shruti Kumar,Gujarat,Rajkot,MidMarket,80026.41,17722.23,0.13,2025-08-08
+CUST-0305,Ashok Kumar,Rajasthan,Jodhpur,Startup,30917.13,4095.96,0.58,2025-08-14
+CUST-0306,Ravi Sen,Uttar Pradesh,Kanpur,SMB,57785.62,4677.48,0.46,2025-07-12
+CUST-0307,Rahul Bhatia,Telangana,Warangal,MidMarket,92955.28,8053.4,0.16,2025-09-10
+CUST-0308,Lata Kapoor,West Bengal,Kolkata,SMB,67970.14,7832.0,0.35,2025-10-22
+CUST-0309,Mahesh Gupta,Karnataka,Mangaluru,SMB,58346.52,8372.74,0.44,2025-04-05
+CUST-0310,Rajesh Roy,Tamil Nadu,Salem,SMB,68824.3,9353.9,0.32,2025-03-22
+CUST-0311,Manoj Patel,Rajasthan,Udaipur,Enterprise,222152.0,23237.0,0.18,2025-05-14
+CUST-0312,Rekha Biswas,Telangana,Khammam,MidMarket,68575.37,15626.02,0.31,2025-03-06
+CUST-0313,Mohan Gowda,Karnataka,Hubli,Enterprise,225832.01,35295.04,0.04,2025-07-31
+CUST-0314,Anita Nambiar,Maharashtra,Nashik,Startup,22690.33,3969.82,0.64,2025-07-02
+CUST-0315,Harish Dey,Gujarat,Ahmedabad,SMB,67752.85,4984.77,0.21,2025-10-07
+CUST-0316,Divya Sinha,Karnataka,Mangaluru,SMB,66352.86,7457.82,0.4,2025-04-12
+CUST-0317,Rajesh Mishra,Punjab,Amritsar,SMB,65407.17,9840.04,0.38,2025-10-11
+CUST-0318,Ramesh Kumar,Punjab,Ludhiana,MidMarket,149931.27,13396.79,0.2,2025-12-17
+CUST-0319,Smita Gupta,Punjab,Ludhiana,MidMarket,123761.3,16269.6,0.36,2025-03-24
+CUST-0320,Pallavi Sen,Karnataka,Mysuru,SMB,68811.79,10248.96,0.43,2025-05-03
+CUST-0321,Arun Raju,Delhi,Rohini,Startup,15242.21,4436.41,0.78,2025-05-12
+CUST-0322,Vinod Kumar,Maharashtra,Nashik,Startup,39737.02,6202.29,0.36,2025-11-24
+CUST-0323,Suresh Reddy,Rajasthan,Jodhpur,SMB,60574.07,7405.13,0.43,2025-09-15
+CUST-0324,Pallavi Biswas,Tamil Nadu,Chennai,SMB,72807.5,3837.85,0.41,2025-09-10
+CUST-0325,Jyoti Mukherjee,Gujarat,Rajkot,MidMarket,50247.31,17289.62,0.32,2025-06-10
+CUST-0326,Pallavi Jain,Rajasthan,Jaipur,SMB,43862.95,11713.16,0.53,2025-05-22
+CUST-0327,Arun Das,West Bengal,Durgapur,SMB,27835.66,10671.8,0.52,2025-02-15
+CUST-0328,Lata Iyer,Maharashtra,Nashik,Enterprise,471773.15,22109.26,0.13,2025-06-25
+CUST-0329,Pooja Saxena,Uttar Pradesh,Agra,Enterprise,473090.23,27330.88,0.17,2025-09-24
+CUST-0330,Amit Mukherjee,Rajasthan,Jodhpur,Enterprise,350241.71,47669.48,0.2,2025-06-25
+CUST-0331,Ashok Patel,Rajasthan,Jaipur,MidMarket,57793.87,15124.15,0.26,2025-06-17
+CUST-0332,Anita Rao,Rajasthan,Jaipur,Startup,19780.99,1793.05,0.34,2025-07-18
+CUST-0333,Amit Malhotra,West Bengal,Kolkata,MidMarket,138098.9,9645.55,0.33,2025-11-23
+CUST-0334,Ashok Agarwal,Maharashtra,Aurangabad,SMB,56619.15,4477.05,0.34,2025-10-13
+CUST-0335,Pallavi Bhatia,Maharashtra,Nashik,SMB,46543.03,4955.2,0.56,2025-11-20
+CUST-0336,Lata Gupta,Telangana,Karimnagar,MidMarket,92938.87,17492.92,0.17,2025-03-06
+CUST-0337,Amit Tiwari,Delhi,Laxmi Nagar,SMB,37095.25,11471.51,0.21,2025-02-27
+CUST-0338,Kiran Mehta,Delhi,Laxmi Nagar,Enterprise,256700.41,44077.64,0.2,2025-09-30
+CUST-0339,Prakash Chatterjee,Maharashtra,Nashik,SMB,24260.72,10998.52,0.2,2025-07-30
+CUST-0340,Neha Singh,Tamil Nadu,Tiruchirappalli,MidMarket,104635.62,10073.24,0.24,2025-12-24
+CUST-0341,Rahul Naidu,Maharashtra,Nagpur,MidMarket,142257.93,19384.16,0.22,2025-09-06
+CUST-0342,Pallavi Kapoor,Delhi,Janakpuri,MidMarket,90227.74,15686.45,0.26,2025-11-13
+CUST-0343,Arun Patel,Tamil Nadu,Tiruchirappalli,Startup,39100.97,1932.26,0.46,2025-04-05
+CUST-0344,Pallavi Chopra,West Bengal,Kolkata,MidMarket,93748.6,19441.14,0.17,2025-09-27
+CUST-0345,Amit Sen,Maharashtra,Aurangabad,SMB,38557.4,9675.24,0.5,2025-11-30
+CUST-0346,Anita Kapoor,Maharashtra,Mumbai,Enterprise,481206.48,38535.24,0.2,2025-09-20
+CUST-0347,Sunita Mukherjee,Maharashtra,Nagpur,SMB,27083.4,11099.08,0.33,2025-06-25
+CUST-0348,Arun Shetty,Maharashtra,Aurangabad,SMB,49768.85,7597.04,0.22,2025-04-15
+CUST-0349,Sunita Mukherjee,Maharashtra,Mumbai,Startup,28594.22,1692.0,0.67,2026-01-29
+CUST-0350,Leena Rao,Karnataka,Mangaluru,MidMarket,142022.65,10147.53,0.39,2026-01-12
+CUST-0351,Ravi Kapoor,Punjab,Jalandhar,MidMarket,74826.32,18990.26,0.2,2025-12-22
+CUST-0352,Seema Mukherjee,Maharashtra,Mumbai,Enterprise,421735.21,59163.62,0.24,2025-12-26
+CUST-0353,Mahesh Sinha,Punjab,Amritsar,MidMarket,105309.14,8095.63,0.16,2025-04-17
+CUST-0354,Kiran Bhatia,Telangana,Karimnagar,MidMarket,147185.77,19973.45,0.33,2025-04-26
+CUST-0355,Lata Tiwari,Maharashtra,Nashik,Enterprise,316618.08,43617.38,0.18,2026-01-26
+CUST-0356,Vikram Rao,Punjab,Jalandhar,SMB,63632.9,3935.54,0.41,2025-10-01
+CUST-0357,Poonam Nambiar,Uttar Pradesh,Kanpur,SMB,25581.6,11291.47,0.56,2025-05-09
+CUST-0358,Poonam Saxena,Uttar Pradesh,Varanasi,Startup,7971.58,1573.46,0.37,2025-07-13
+CUST-0359,Priya Naidu,Telangana,Karimnagar,SMB,27842.5,5625.08,0.54,2025-07-13
+CUST-0360,Jyoti Bhatia,Tamil Nadu,Salem,MidMarket,57468.74,10432.55,0.33,2025-04-06
+CUST-0361,Deepa Reddy,Maharashtra,Nashik,MidMarket,90651.26,14431.09,0.39,2025-10-16
+CUST-0362,Smita Ghosh,Gujarat,Ahmedabad,Enterprise,423038.76,28689.67,0.19,2025-03-28
+CUST-0363,Leena Mehta,West Bengal,Durgapur,Enterprise,384462.96,58578.0,0.12,2026-01-05
+CUST-0364,Vinod Ghosh,Karnataka,Mysuru,Enterprise,261756.89,35349.05,0.19,2025-09-25
+CUST-0365,Deepa Basu,Maharashtra,Pune,Enterprise,124667.67,50143.2,0.08,2025-10-21
+CUST-0366,Dinesh Mukherjee,Rajasthan,Jaipur,SMB,35529.24,10314.72,0.21,2025-12-28
+CUST-0367,Pooja Kulkarni,Gujarat,Surat,Enterprise,438910.17,51399.92,0.06,2025-06-08
+CUST-0368,Sanjay Shah,Uttar Pradesh,Varanasi,SMB,43699.92,3265.34,0.47,2025-11-03
+CUST-0369,Anjali Mehta,Uttar Pradesh,Agra,MidMarket,138342.38,8415.79,0.29,2025-09-27
+CUST-0370,Ashok Sinha,Delhi,Laxmi Nagar,MidMarket,58772.16,12596.18,0.23,2025-03-07
+CUST-0371,Ganesh Tiwari,Telangana,Khammam,SMB,79364.22,10037.24,0.34,2025-04-27
+CUST-0372,Prakash Roy,Uttar Pradesh,Meerut,MidMarket,77043.57,8312.76,0.28,2026-01-15
+CUST-0373,Naresh Mishra,Maharashtra,Nashik,SMB,66010.53,11996.45,0.59,2025-12-10
+CUST-0374,Suresh Jain,Karnataka,Belagavi,SMB,75035.57,3503.18,0.6,2025-10-10
+CUST-0375,Seema Chatterjee,Tamil Nadu,Coimbatore,Enterprise,337007.8,51279.46,0.18,2025-04-03
+CUST-0376,Rahul Kapoor,Rajasthan,Ajmer,SMB,53786.53,4694.1,0.6,2025-05-23
+CUST-0377,Divya Ghosh,Karnataka,Bengaluru,Enterprise,193049.34,24846.4,0.15,2026-01-30
+CUST-0378,Vikram Prasad,Karnataka,Mysuru,MidMarket,67745.99,17629.09,0.36,2025-12-31
+CUST-0379,Rahul Reddy,Telangana,Warangal,SMB,70788.85,10746.03,0.58,2025-07-23
+CUST-0380,Harish Jain,Tamil Nadu,Chennai,MidMarket,82260.32,19710.33,0.32,2025-06-21
+CUST-0381,Pallavi Nambiar,Telangana,Warangal,SMB,53718.64,11006.4,0.45,2025-08-01
+CUST-0382,Meena Jain,Telangana,Warangal,MidMarket,123399.5,11534.21,0.15,2026-01-30
+CUST-0383,Jyoti Murthy,Tamil Nadu,Tiruchirappalli,Enterprise,340955.47,56446.72,0.24,2025-10-09
+CUST-0384,Pallavi Murthy,Maharashtra,Nashik,Enterprise,398137.33,25709.82,0.25,2025-11-06
+CUST-0385,Pallavi Patel,West Bengal,Durgapur,MidMarket,76521.24,10994.49,0.12,2025-09-21
+CUST-0386,Deepa Malhotra,Maharashtra,Nashik,MidMarket,91965.32,9996.06,0.22,2025-07-21
+CUST-0387,Anjali Hegde,Tamil Nadu,Salem,SMB,54683.33,9824.19,0.29,2025-06-13
+CUST-0388,Priya Nair,Tamil Nadu,Madurai,MidMarket,60472.5,12101.7,0.37,2025-11-09
+CUST-0389,Shweta Menon,Delhi,New Delhi,MidMarket,148527.61,18718.71,0.31,2025-06-24
+CUST-0390,Ashok Shah,Telangana,Karimnagar,Enterprise,140503.12,24249.77,0.07,2025-02-08
+CUST-0391,Ravi Malhotra,Uttar Pradesh,Meerut,MidMarket,78152.31,10850.58,0.11,2025-04-13
+CUST-0392,Ravi Nambiar,Maharashtra,Nagpur,Enterprise,135051.34,52075.38,0.17,2025-05-30
+CUST-0393,Pooja Kumar,Maharashtra,Pune,SMB,78623.46,7262.14,0.25,2025-07-11
+CUST-0394,Shruti Nambiar,Uttar Pradesh,Agra,Enterprise,317650.41,23319.65,0.22,2025-07-25
+CUST-0395,Mohan Dey,Maharashtra,Nashik,MidMarket,72624.23,11222.74,0.12,2025-02-08
+CUST-0396,Nisha Kumar,Maharashtra,Nagpur,SMB,44839.2,9808.11,0.29,2025-12-30
+CUST-0397,Rekha Shetty,Gujarat,Bhavnagar,SMB,76181.69,8154.43,0.29,2025-08-30
+CUST-0398,Amit Banerjee,Uttar Pradesh,Lucknow,SMB,74027.3,10204.05,0.47,2025-03-19
+CUST-0399,Vijay Gupta,Uttar Pradesh,Varanasi,Enterprise,493747.2,58747.42,0.21,2025-11-27
+CUST-0400,Leena Sen,Maharashtra,Nashik,MidMarket,132256.4,9774.54,0.28,2025-08-20
+CUST-0401,Shweta Menon,Maharashtra,Aurangabad,MidMarket,82612.68,11314.41,0.24,2026-01-24
+CUST-0402,Jyoti Prasad,Telangana,Karimnagar,Enterprise,159856.93,40496.73,0.16,2025-12-10
+CUST-0403,Deepa Murthy,Punjab,Amritsar,Startup,35804.75,6267.36,0.43,2025-03-01
+CUST-0404,Prakash Murthy,Telangana,Hyderabad,Enterprise,261189.58,42821.0,0.18,2025-07-09
+CUST-0405,Leena Banerjee,West Bengal,Durgapur,SMB,22957.46,7276.96,0.31,2025-07-24
+CUST-0406,Rahul Bose,West Bengal,Durgapur,MidMarket,134284.66,18298.82,0.31,2025-10-06
+CUST-0407,Kavita Ghosh,Uttar Pradesh,Varanasi,SMB,39252.1,9559.19,0.44,2025-12-16
+CUST-0408,Pooja Dey,Karnataka,Mangaluru,SMB,65569.6,10804.7,0.53,2025-05-12
+CUST-0409,Sunita Menon,Tamil Nadu,Tiruchirappalli,MidMarket,128051.64,14291.43,0.27,2025-11-03
+CUST-0410,Pooja Desai,West Bengal,Howrah,Enterprise,120223.71,31216.88,0.07,2025-07-26
+CUST-0411,Mahesh Kamath,Tamil Nadu,Chennai,SMB,34516.29,7399.08,0.38,2025-06-02
+CUST-0412,Manoj Gowda,Tamil Nadu,Coimbatore,SMB,35519.6,10477.83,0.24,2026-01-16
+CUST-0413,Rekha Iyer,Maharashtra,Aurangabad,SMB,32859.12,4992.16,0.29,2025-10-17
+CUST-0414,Arun Kulkarni,Gujarat,Ahmedabad,Startup,38849.84,5093.2,0.54,2025-11-24
+CUST-0415,Ashok Joshi,Telangana,Hyderabad,MidMarket,110834.39,19316.06,0.31,2025-02-01
+CUST-0416,Ashok Mishra,Gujarat,Rajkot,Startup,21064.93,2309.25,0.45,2025-05-09
+CUST-0417,Sunil Banerjee,Telangana,Hyderabad,SMB,59741.33,10589.56,0.35,2025-03-05
+CUST-0418,Geeta Raju,Karnataka,Bengaluru,MidMarket,83628.37,11317.8,0.2,2025-09-11
+CUST-0419,Rina Kulkarni,Rajasthan,Udaipur,Enterprise,306917.43,25813.59,0.04,2025-03-29
+CUST-0420,Dinesh Jain,Tamil Nadu,Coimbatore,SMB,59324.03,11977.22,0.3,2025-06-30
+CUST-0421,Dinesh Chatterjee,Punjab,Patiala,SMB,54322.55,4709.24,0.49,2025-10-09
+CUST-0422,Vinod Hegde,Telangana,Karimnagar,Startup,28515.4,4043.89,0.72,2025-02-28
+CUST-0423,Ravi Joshi,Tamil Nadu,Salem,Enterprise,203460.74,51375.47,0.2,2025-10-29
+CUST-0424,Vinod Bose,Rajasthan,Jodhpur,MidMarket,124420.99,11685.02,0.34,2025-08-14
+CUST-0425,Nikhil Pandey,Telangana,Karimnagar,Startup,21468.78,6198.36,0.59,2025-03-19
+CUST-0426,Priya Pillai,West Bengal,Siliguri,Enterprise,372279.11,38842.73,0.12,2025-11-14
+CUST-0427,Kavita Desai,Tamil Nadu,Tiruchirappalli,Startup,39532.72,1859.34,0.73,2025-10-30
+CUST-0428,Naresh Patel,Gujarat,Surat,MidMarket,55801.36,13424.64,0.16,2025-11-05
+CUST-0429,Seema Chopra,Maharashtra,Mumbai,Enterprise,273484.57,34323.44,0.12,2025-05-31
+CUST-0430,Rekha Rao,Maharashtra,Pune,SMB,77004.12,11028.06,0.5,2025-05-04
+CUST-0431,Pooja Sharma,Rajasthan,Jodhpur,MidMarket,137698.51,11745.11,0.13,2025-05-18
+CUST-0432,Manoj Ghosh,Karnataka,Bengaluru,MidMarket,79082.78,16733.98,0.28,2025-08-11
+CUST-0433,Ramesh Agarwal,Uttar Pradesh,Agra,Startup,22156.25,5500.69,0.38,2025-07-08
+CUST-0434,Rahul Verma,Karnataka,Mysuru,MidMarket,52191.33,14055.6,0.14,2025-01-31
+CUST-0435,Ashok Nair,Tamil Nadu,Madurai,SMB,57388.09,8345.32,0.22,2025-12-06
+CUST-0436,Ashok Sharma,Maharashtra,Mumbai,MidMarket,88025.38,14567.39,0.24,2025-11-13
+CUST-0437,Arjun Saxena,Rajasthan,Jaipur,MidMarket,116166.46,15949.8,0.18,2025-03-26
+CUST-0438,Jyoti Singh,Gujarat,Ahmedabad,SMB,57061.88,5544.36,0.51,2025-05-21
+CUST-0439,Pooja Raju,Karnataka,Hubli,SMB,78387.18,6221.3,0.36,2025-11-09
+CUST-0440,Leena Gowda,Delhi,Dwarka,SMB,48839.84,5110.55,0.21,2025-12-16
+CUST-0441,Rajesh Murthy,Rajasthan,Jodhpur,Startup,32283.42,1450.29,0.66,2025-09-21
+CUST-0442,Ashok Verma,Gujarat,Vadodara,MidMarket,55008.02,17758.14,0.36,2025-09-04
+CUST-0443,Nikhil Agarwal,Tamil Nadu,Chennai,Enterprise,403281.6,17065.01,0.22,2025-02-25
+CUST-0444,Ashok Shah,Tamil Nadu,Salem,Startup,14390.83,5398.41,0.49,2025-08-08
+CUST-0445,Mohan Gupta,Tamil Nadu,Salem,MidMarket,88571.55,18208.06,0.34,2025-03-04
+CUST-0446,Sunita Gupta,Maharashtra,Mumbai,Startup,34552.24,1622.28,0.76,2025-05-28
+CUST-0447,Seema Agarwal,Gujarat,Bhavnagar,MidMarket,85859.89,8345.79,0.31,2025-11-25
+CUST-0448,Shruti Nambiar,Maharashtra,Nashik,MidMarket,56333.6,15859.68,0.1,2025-02-17
+CUST-0449,Ganesh Arora,Punjab,Patiala,MidMarket,145576.14,18477.72,0.26,2025-02-12
+CUST-0450,Jyoti Prasad,Maharashtra,Pune,MidMarket,116371.06,15696.85,0.14,2025-04-20
+CUST-0451,Sunil Iyer,Maharashtra,Pune,SMB,48157.34,7462.51,0.27,2025-05-24
+CUST-0452,Neha Tiwari,Tamil Nadu,Madurai,Enterprise,189082.61,43949.28,0.12,2025-10-02
+CUST-0453,Amit Basu,Gujarat,Bhavnagar,MidMarket,135658.92,13364.82,0.14,2025-05-21
+CUST-0454,Anil Kulkarni,Maharashtra,Nashik,MidMarket,105713.1,8002.04,0.13,2025-03-27
+CUST-0455,Sunil Patil,Tamil Nadu,Tiruchirappalli,SMB,59275.76,7105.87,0.34,2026-01-03
+CUST-0456,Meena Basu,Tamil Nadu,Tiruchirappalli,SMB,62999.48,6269.65,0.38,2025-12-12
+CUST-0457,Lata Jain,Karnataka,Hubli,MidMarket,113366.12,17598.95,0.26,2025-07-23
+CUST-0458,Jyoti Kumar,Maharashtra,Pune,MidMarket,132183.87,16910.13,0.22,2025-09-22
+CUST-0459,Sunil Desai,Karnataka,Mangaluru,MidMarket,132455.41,10286.95,0.2,2025-07-02
+CUST-0460,Leena Patil,West Bengal,Siliguri,Enterprise,456701.74,35582.45,0.16,2025-05-17
+CUST-0461,Kavita Nambiar,Maharashtra,Mumbai,SMB,45968.62,8266.09,0.57,2025-11-01
+CUST-0462,Jyoti Naidu,Karnataka,Mysuru,Enterprise,363008.72,42277.23,0.1,2025-07-18
+CUST-0463,Poonam Raju,Uttar Pradesh,Kanpur,MidMarket,146359.35,19645.9,0.24,2025-11-23
+CUST-0464,Kavita Biswas,Telangana,Khammam,MidMarket,120149.43,18328.49,0.31,2025-04-22
+CUST-0465,Pallavi Mehta,Karnataka,Belagavi,SMB,61196.68,11290.73,0.25,2025-02-01
+CUST-0466,Ashok Joshi,Delhi,Rohini,SMB,65646.5,8060.52,0.43,2025-02-23
+CUST-0467,Harish Biswas,Rajasthan,Ajmer,MidMarket,134730.11,17699.66,0.26,2026-01-18
+CUST-0468,Rekha Reddy,Maharashtra,Mumbai,Enterprise,400074.01,22242.09,0.09,2025-09-24
+CUST-0469,Vijay Iyer,Rajasthan,Udaipur,MidMarket,104117.21,12304.19,0.24,2025-03-21
+CUST-0470,Vinod Bhatia,Delhi,Dwarka,SMB,53676.23,5138.36,0.51,2025-02-08
+CUST-0471,Swati Saxena,Rajasthan,Kota,MidMarket,145670.2,19709.87,0.19,2025-04-23
+CUST-0472,Sanjay Rao,Punjab,Ludhiana,SMB,66855.49,10831.06,0.53,2025-03-12
+CUST-0473,Harish Kapoor,Telangana,Khammam,SMB,56203.22,9985.32,0.59,2025-09-02
+CUST-0474,Smita Joshi,Uttar Pradesh,Lucknow,Enterprise,169518.05,38123.11,0.11,2025-06-25
+CUST-0475,Arun Gowda,Karnataka,Mysuru,SMB,35300.97,5975.07,0.48,2025-11-12
+CUST-0476,Leena Reddy,Uttar Pradesh,Meerut,Enterprise,472952.75,42702.39,0.18,2025-05-24
+CUST-0477,Seema Gowda,Tamil Nadu,Madurai,SMB,77419.26,7685.46,0.51,2025-11-10
+CUST-0478,Poonam Hegde,Delhi,New Delhi,MidMarket,138339.67,15960.01,0.2,2025-09-02
+CUST-0479,Arjun Chopra,Telangana,Karimnagar,Startup,33829.09,6886.8,0.3,2025-02-22
+CUST-0480,Anjali Dey,Karnataka,Belagavi,Startup,13533.95,1239.26,0.74,2025-07-19
+CUST-0481,Rajesh Chatterjee,Karnataka,Hubli,Enterprise,306747.13,49672.24,0.14,2025-05-15
+CUST-0482,Smita Nambiar,Maharashtra,Pune,MidMarket,58234.54,9151.48,0.39,2025-04-30
+CUST-0483,Divya Rao,Telangana,Warangal,SMB,66414.94,10784.56,0.37,2025-12-08
+CUST-0484,Arjun Hegde,West Bengal,Asansol,SMB,76385.07,9722.02,0.26,2025-06-09
+CUST-0485,Harish Bose,Maharashtra,Mumbai,Enterprise,417685.91,40113.79,0.16,2025-10-06
+CUST-0486,Rina Biswas,Tamil Nadu,Salem,MidMarket,51689.1,16079.58,0.26,2025-03-08
+CUST-0487,Shweta Prasad,Maharashtra,Aurangabad,Enterprise,439300.5,31096.51,0.14,2025-09-04
+CUST-0488,Vinod Ghosh,Telangana,Nizamabad,SMB,46260.57,6556.02,0.46,2025-06-02
+CUST-0489,Sunita Hegde,Karnataka,Mangaluru,SMB,70968.05,5654.81,0.45,2025-08-31
+CUST-0490,Vinod Malhotra,Telangana,Hyderabad,SMB,53304.18,4109.12,0.2,2025-03-31
+CUST-0491,Dinesh Hegde,Delhi,New Delhi,MidMarket,124829.66,18842.56,0.2,2025-07-03
+CUST-0492,Ashok Kamath,Maharashtra,Pune,MidMarket,133474.84,10331.91,0.15,2025-04-15
+CUST-0493,Sanjay Chopra,Uttar Pradesh,Meerut,MidMarket,104966.46,11487.83,0.12,2025-12-11
+CUST-0494,Pooja Malhotra,Telangana,Nizamabad,MidMarket,117129.56,10814.39,0.19,2025-12-26
+CUST-0495,Pooja Das,Gujarat,Vadodara,SMB,38340.53,8257.53,0.43,2025-07-28
+CUST-0496,Neha Sen,Karnataka,Hubli,MidMarket,72152.57,16877.79,0.23,2025-07-30
+CUST-0497,Kavita Agarwal,Punjab,Jalandhar,MidMarket,85874.16,11665.66,0.27,2025-11-02
+CUST-0498,Ashok Raju,Maharashtra,Nagpur,Startup,9900.06,4231.71,0.43,2025-03-16
+CUST-0499,Priya Malhotra,Maharashtra,Mumbai,SMB,57897.59,10313.78,0.43,2025-04-03
+CUST-0500,Arjun Nair,Delhi,Laxmi Nagar,Startup,23888.7,4923.45,0.37,2025-07-14
+CUST-0501,Meena Arora,Telangana,Nizamabad,Enterprise,300449.27,19074.93,0.11,2026-01-25
+CUST-0502,Nisha Tiwari,West Bengal,Siliguri,SMB,65432.36,4263.34,0.26,2025-04-16
+CUST-0503,Seema Jain,West Bengal,Howrah,SMB,49010.2,6229.16,0.29,2025-05-26
+CUST-0504,Meena Menon,Karnataka,Mysuru,Enterprise,182709.63,55847.67,0.11,2025-06-04
+CUST-0505,Mahesh Nair,Maharashtra,Nagpur,Enterprise,487376.56,43510.51,0.09,2025-09-18
+CUST-0506,Manoj Hegde,Telangana,Karimnagar,SMB,41917.81,8880.03,0.53,2025-05-11
+CUST-0507,Rina Chatterjee,Uttar Pradesh,Kanpur,SMB,41173.88,10809.47,0.39,2025-05-29
+CUST-0508,Geeta Rao,Delhi,Dwarka,MidMarket,72999.08,14174.5,0.18,2025-11-15
+CUST-0509,Mohan Shah,Tamil Nadu,Chennai,SMB,44876.82,5972.02,0.25,2025-02-19
+CUST-0510,Shruti Pillai,Karnataka,Mysuru,SMB,44653.95,5193.03,0.25,2025-04-02
+CUST-0511,Sunita Singh,Telangana,Hyderabad,Startup,10140.28,1998.05,0.76,2025-05-11
+CUST-0512,Dinesh Raju,Uttar Pradesh,Lucknow,Startup,30479.1,5927.82,0.77,2025-10-12
+CUST-0513,Smita Raju,Uttar Pradesh,Varanasi,Enterprise,432145.43,42037.74,0.2,2025-10-29
+CUST-0514,Sunil Jain,Delhi,Dwarka,SMB,40560.28,7081.23,0.44,2025-10-05
+CUST-0515,Rekha Chatterjee,Maharashtra,Mumbai,MidMarket,135959.17,14052.31,0.23,2025-11-15
+CUST-0516,Geeta Kumar,Karnataka,Belagavi,SMB,72665.16,7782.87,0.5,2025-12-14
+CUST-0517,Shruti Jain,Maharashtra,Aurangabad,SMB,20072.01,11439.61,0.47,2025-06-24
+CUST-0518,Ganesh Biswas,Tamil Nadu,Chennai,SMB,45737.38,11445.79,0.39,2025-07-19
+CUST-0519,Anjali Naidu,West Bengal,Siliguri,Enterprise,153553.24,36471.36,0.08,2025-12-19
+CUST-0520,Swati Raju,West Bengal,Asansol,MidMarket,50546.95,16923.75,0.1,2025-05-08
+CUST-0521,Rajesh Shetty,Maharashtra,Pune,SMB,38954.1,6260.43,0.26,2025-03-03
+CUST-0522,Manoj Pandey,Karnataka,Belagavi,MidMarket,86564.41,11306.73,0.3,2025-10-18
+CUST-0523,Poonam Gowda,Punjab,Jalandhar,Enterprise,323637.53,36769.21,0.25,2025-04-10
+CUST-0524,Anjali Arora,Rajasthan,Jodhpur,Startup,28074.9,5486.89,0.52,2025-02-06
+CUST-0525,Sunita Kumar,Karnataka,Mangaluru,SMB,68051.22,8526.23,0.47,2026-01-04
+CUST-0526,Sunita Chatterjee,Uttar Pradesh,Lucknow,SMB,69395.33,7245.02,0.44,2025-12-16
+CUST-0527,Priya Pandey,Karnataka,Bengaluru,SMB,63469.68,11376.16,0.36,2025-03-01
+CUST-0528,Ganesh Sinha,Rajasthan,Ajmer,Enterprise,409443.38,22887.2,0.14,2026-01-25
+CUST-0529,Pooja Jain,Uttar Pradesh,Meerut,MidMarket,53360.94,15194.18,0.25,2025-10-04
+CUST-0530,Sunil Shah,Rajasthan,Udaipur,MidMarket,50028.73,9889.34,0.4,2025-07-10
+CUST-0531,Anjali Jain,Tamil Nadu,Tiruchirappalli,MidMarket,51536.65,16443.46,0.38,2025-04-24
+CUST-0532,Swati Malhotra,West Bengal,Siliguri,MidMarket,146328.77,11318.09,0.28,2025-10-23
+CUST-0533,Mahesh Banerjee,Telangana,Nizamabad,Enterprise,302495.24,40138.38,0.14,2025-08-09
+CUST-0534,Rajesh Kamath,Uttar Pradesh,Meerut,SMB,54493.63,9247.73,0.59,2025-04-17
+CUST-0535,Shruti Arora,Karnataka,Hubli,Startup,21059.7,3764.32,0.59,2026-01-16
+CUST-0536,Shruti Gupta,Karnataka,Mangaluru,SMB,79651.88,9092.22,0.29,2025-08-22
+CUST-0537,Poonam Roy,Delhi,New Delhi,SMB,35800.98,5585.61,0.36,2025-08-08
+CUST-0538,Priya Gowda,Uttar Pradesh,Varanasi,MidMarket,71856.61,14884.55,0.15,2025-02-15
+CUST-0539,Pooja Nambiar,Punjab,Ludhiana,SMB,72364.55,4861.01,0.28,2025-09-25
+CUST-0540,Sunil Roy,Maharashtra,Mumbai,Enterprise,131395.03,58010.09,0.14,2026-01-27
+CUST-0541,Lata Hegde,Uttar Pradesh,Varanasi,MidMarket,81541.69,18777.45,0.36,2025-04-11
+CUST-0542,Arun Nambiar,Karnataka,Belagavi,MidMarket,72209.28,14919.98,0.12,2025-06-28
+CUST-0543,Shruti Hegde,Maharashtra,Nagpur,MidMarket,118633.86,10097.6,0.39,2025-02-07
+CUST-0544,Ganesh Basu,Tamil Nadu,Chennai,Enterprise,184300.95,41145.37,0.1,2025-03-23
+CUST-0545,Rina Joshi,Delhi,Dwarka,MidMarket,145852.68,12117.16,0.16,2025-06-27
+CUST-0546,Arjun Biswas,Rajasthan,Udaipur,MidMarket,90059.26,13408.75,0.27,2025-04-11
+CUST-0547,Vinod Verma,West Bengal,Durgapur,SMB,53320.4,10706.78,0.28,2025-11-15
+CUST-0548,Shruti Rao,Karnataka,Mangaluru,Enterprise,457308.16,43379.34,0.15,2025-08-22
+CUST-0549,Prakash Ghosh,Karnataka,Belagavi,Enterprise,139589.92,22350.38,0.08,2025-09-22
+CUST-0550,Shruti Patil,Maharashtra,Nagpur,MidMarket,86030.66,14689.9,0.34,2025-08-07
+CUST-0551,Rahul Biswas,Maharashtra,Aurangabad,Enterprise,330357.78,44210.89,0.07,2025-09-07
+CUST-0552,Anjali Das,Rajasthan,Kota,SMB,46815.81,3705.67,0.45,2025-06-07
+CUST-0553,Pallavi Reddy,West Bengal,Durgapur,MidMarket,111231.01,12857.27,0.37,2025-12-21
+CUST-0554,Sunita Bose,Karnataka,Hubli,SMB,62626.01,8448.46,0.36,2025-06-17
+CUST-0555,Naresh Mukherjee,Punjab,Patiala,Startup,19489.62,2103.32,0.31,2025-10-02
+CUST-0556,Nisha Pandey,Uttar Pradesh,Lucknow,MidMarket,89704.56,9146.64,0.38,2025-06-02
+CUST-0557,Ravi Iyer,Maharashtra,Nashik,SMB,79760.82,3935.36,0.45,2025-12-18
+CUST-0558,Ashok Chatterjee,Tamil Nadu,Coimbatore,SMB,46589.63,4137.71,0.41,2025-11-04
+CUST-0559,Rahul Nair,Rajasthan,Udaipur,Startup,21351.77,6225.39,0.77,2025-04-25
+CUST-0560,Smita Singh,Uttar Pradesh,Meerut,Enterprise,339033.68,43397.14,0.17,2025-04-17
+CUST-0561,Ramesh Shetty,Telangana,Khammam,MidMarket,84716.83,14476.02,0.34,2025-06-18
+CUST-0562,Kiran Mukherjee,Gujarat,Surat,MidMarket,50009.23,17784.56,0.35,2025-08-07
+CUST-0563,Swati Pillai,Delhi,Janakpuri,Startup,21697.35,1054.8,0.52,2025-09-03
+CUST-0564,Geeta Verma,West Bengal,Siliguri,MidMarket,91173.59,14726.65,0.22,2025-11-08
+CUST-0565,Harish Bhatia,Telangana,Karimnagar,MidMarket,57920.97,15503.88,0.25,2025-03-23
+CUST-0566,Jyoti Agarwal,Karnataka,Belagavi,SMB,44774.23,10681.34,0.27,2025-09-04
+CUST-0567,Rajesh Patil,Gujarat,Rajkot,MidMarket,112275.38,10253.47,0.11,2026-01-05
+CUST-0568,Divya Sharma,Karnataka,Bengaluru,MidMarket,62503.92,13261.0,0.1,2025-12-15
+CUST-0569,Vijay Rao,Delhi,Rohini,MidMarket,128572.53,13980.75,0.21,2025-02-08
+CUST-0570,Leena Bose,Maharashtra,Pune,Enterprise,410261.16,18212.31,0.13,2025-10-24
+CUST-0571,Rina Chatterjee,West Bengal,Kolkata,Startup,30013.89,3308.79,0.79,2025-09-26
+CUST-0572,Anil Nair,Karnataka,Bengaluru,SMB,78926.95,7255.43,0.47,2025-08-24
+CUST-0573,Neha Shah,Telangana,Hyderabad,SMB,52974.8,4099.27,0.39,2025-08-31
+CUST-0574,Pooja Mukherjee,West Bengal,Howrah,Startup,13258.8,3604.97,0.31,2025-09-11
+CUST-0575,Manoj Gupta,Tamil Nadu,Coimbatore,Enterprise,116797.35,50256.39,0.13,2025-03-31
+CUST-0576,Vijay Mukherjee,Punjab,Ludhiana,Enterprise,136560.62,42839.02,0.23,2025-03-16
+CUST-0577,Sanjay Iyer,Tamil Nadu,Coimbatore,SMB,67487.97,4132.45,0.29,2025-04-20
+CUST-0578,Ashok Chopra,Tamil Nadu,Salem,SMB,21281.17,6399.92,0.49,2025-09-24
+CUST-0579,Leena Nambiar,Rajasthan,Ajmer,MidMarket,119703.78,10277.31,0.16,2025-08-05
+CUST-0580,Neha Malhotra,Gujarat,Bhavnagar,Startup,24408.21,1413.26,0.38,2025-09-01
+CUST-0581,Rina Hegde,Tamil Nadu,Chennai,SMB,50357.46,9602.92,0.55,2025-03-19
+CUST-0582,Nikhil Arora,Telangana,Nizamabad,SMB,59497.37,7850.61,0.35,2025-05-07
+CUST-0583,Vinod Nambiar,Punjab,Ludhiana,SMB,39356.0,8768.14,0.24,2025-05-08
+CUST-0584,Nisha Menon,Maharashtra,Pune,Enterprise,112509.5,19817.48,0.07,2026-01-14
+CUST-0585,Seema Kulkarni,West Bengal,Asansol,SMB,62078.84,5303.45,0.35,2025-03-26
+CUST-0586,Harish Menon,Maharashtra,Pune,SMB,75704.22,10488.7,0.39,2025-03-09
+CUST-0587,Sanjay Mukherjee,Delhi,Janakpuri,SMB,67654.97,3524.7,0.45,2025-05-05
+CUST-0588,Leena Malhotra,Maharashtra,Nagpur,Enterprise,186360.03,38376.84,0.05,2025-10-04
+CUST-0589,Divya Chatterjee,Karnataka,Belagavi,SMB,54201.66,11527.53,0.42,2025-04-20
+CUST-0590,Poonam Bhatia,Maharashtra,Aurangabad,MidMarket,95872.06,15982.91,0.36,2025-11-06
+CUST-0591,Mohan Gowda,Tamil Nadu,Madurai,SMB,52034.03,8399.24,0.57,2025-08-22
+CUST-0592,Ravi Das,West Bengal,Asansol,SMB,45835.28,9532.81,0.44,2025-04-17
+CUST-0593,Divya Mehta,Tamil Nadu,Tiruchirappalli,Startup,13893.12,6769.91,0.52,2025-07-11
+CUST-0594,Anita Malhotra,Maharashtra,Nagpur,SMB,51056.56,11940.71,0.32,2025-08-30
+CUST-0595,Meena Mehta,West Bengal,Kolkata,SMB,76600.87,10401.04,0.57,2025-05-14
+CUST-0596,Ravi Murthy,Uttar Pradesh,Kanpur,Enterprise,284147.92,22024.82,0.09,2025-04-07
+CUST-0597,Suresh Verma,Karnataka,Hubli,Enterprise,259919.3,56304.68,0.19,2025-08-17
+CUST-0598,Shruti Joshi,Gujarat,Bhavnagar,SMB,25721.84,8780.29,0.21,2025-04-10
+CUST-0599,Rekha Patel,Punjab,Amritsar,MidMarket,131714.17,12998.26,0.36,2025-10-06
+CUST-0600,Anil Kulkarni,West Bengal,Kolkata,SMB,57931.62,3487.15,0.41,2025-08-20
+CUST-0601,Divya Murthy,Maharashtra,Aurangabad,SMB,29191.85,9062.72,0.6,2025-06-16
+CUST-0602,Lata Raju,Telangana,Hyderabad,MidMarket,78978.3,12731.87,0.14,2025-12-19
+CUST-0603,Shruti Murthy,Punjab,Patiala,MidMarket,58507.9,14021.88,0.33,2025-11-25
+CUST-0604,Lata Singh,Gujarat,Surat,MidMarket,115224.84,10353.19,0.28,2025-05-07
+CUST-0605,Suresh Tiwari,Maharashtra,Nashik,MidMarket,142413.81,9075.14,0.3,2025-06-28
+CUST-0606,Nikhil Roy,Karnataka,Hubli,SMB,21452.41,5743.37,0.6,2025-03-21
+CUST-0607,Smita Prasad,Maharashtra,Mumbai,Startup,13172.14,5112.16,0.38,2025-12-18
+CUST-0608,Rajesh Bhatia,Maharashtra,Aurangabad,Startup,35406.33,5920.8,0.31,2025-02-09
+CUST-0609,Rajesh Ghosh,Gujarat,Ahmedabad,MidMarket,124001.3,10542.5,0.26,2025-09-20
+CUST-0610,Ravi Pillai,Telangana,Warangal,SMB,60095.63,6389.46,0.56,2025-05-06
+CUST-0611,Leena Pandey,Karnataka,Hubli,MidMarket,119652.67,11255.38,0.24,2026-01-26
+CUST-0612,Priya Chatterjee,Rajasthan,Udaipur,Startup,5667.74,6204.46,0.62,2025-10-04
+CUST-0613,Rekha Kamath,Uttar Pradesh,Lucknow,Startup,21963.18,4582.64,0.34,2025-10-21
+CUST-0614,Usha Basu,Delhi,New Delhi,Enterprise,468908.05,28721.74,0.14,2025-11-11
+CUST-0615,Rahul Roy,Rajasthan,Udaipur,SMB,34172.29,11804.2,0.4,2025-12-30
+CUST-0616,Pallavi Pandey,West Bengal,Kolkata,Startup,38219.07,2353.5,0.47,2025-07-13
+CUST-0617,Nisha Singh,Maharashtra,Nashik,SMB,60679.69,10854.31,0.47,2025-07-01
+CUST-0618,Suresh Murthy,Maharashtra,Nagpur,Startup,16524.97,4253.4,0.4,2025-11-21
+CUST-0619,Manoj Hegde,Rajasthan,Jodhpur,Startup,15814.94,5230.82,0.56,2025-11-22
+CUST-0620,Ramesh Arora,Maharashtra,Aurangabad,Startup,16112.37,4344.04,0.77,2025-12-01
+CUST-0621,Mohan Das,West Bengal,Howrah,SMB,65926.1,10921.19,0.37,2025-07-04
+CUST-0622,Kiran Dey,Punjab,Amritsar,Enterprise,175173.44,20919.56,0.04,2025-03-23
+CUST-0623,Sunil Mishra,Telangana,Khammam,MidMarket,73218.25,16248.53,0.21,2025-02-12
+CUST-0624,Naresh Pillai,Maharashtra,Aurangabad,MidMarket,114956.86,10207.72,0.22,2025-06-02
+CUST-0625,Kavita Shah,Karnataka,Bengaluru,MidMarket,146881.51,19105.22,0.39,2025-10-09
+CUST-0626,Anil Jain,Uttar Pradesh,Kanpur,Enterprise,470841.28,59353.24,0.22,2025-05-25
+CUST-0627,Jyoti Das,West Bengal,Howrah,MidMarket,127621.47,15295.16,0.35,2025-08-23
+CUST-0628,Dinesh Prasad,Uttar Pradesh,Meerut,SMB,51513.83,10882.05,0.51,2025-05-09
+CUST-0629,Deepa Dey,Gujarat,Ahmedabad,Startup,13600.26,4227.21,0.79,2026-01-10
+CUST-0630,Ravi Chatterjee,Delhi,New Delhi,Enterprise,275821.55,54797.89,0.2,2025-09-06
+CUST-0631,Mahesh Shah,Gujarat,Bhavnagar,Startup,29148.35,6422.05,0.53,2025-03-06
+CUST-0632,Smita Patel,Rajasthan,Jaipur,Enterprise,334179.09,55244.76,0.15,2025-07-13
+CUST-0633,Poonam Das,Gujarat,Surat,MidMarket,139661.75,18749.54,0.36,2025-12-15
+CUST-0634,Rina Das,Rajasthan,Jodhpur,SMB,27412.65,4027.48,0.38,2025-07-29
+CUST-0635,Amit Shetty,Rajasthan,Ajmer,SMB,29593.98,7953.11,0.22,2025-11-04
+CUST-0636,Vikram Murthy,West Bengal,Howrah,Enterprise,157842.95,49612.06,0.04,2025-08-26
+CUST-0637,Kiran Malhotra,Punjab,Jalandhar,MidMarket,68069.6,18782.5,0.39,2026-01-29
+CUST-0638,Sunil Chopra,Karnataka,Mangaluru,MidMarket,99864.22,17689.45,0.28,2025-05-23
+CUST-0639,Suresh Mehta,Telangana,Karimnagar,MidMarket,94187.54,15214.6,0.1,2025-04-25
+CUST-0640,Arun Prasad,Telangana,Warangal,Enterprise,159302.47,44397.46,0.04,2026-01-14
+CUST-0641,Nisha Murthy,West Bengal,Durgapur,MidMarket,58770.27,9306.65,0.4,2025-11-09
+CUST-0642,Vinod Sinha,Telangana,Khammam,SMB,53730.63,11696.64,0.5,2025-07-30
+CUST-0643,Leena Patel,Punjab,Amritsar,MidMarket,87893.94,8812.0,0.23,2025-04-24
+CUST-0644,Priya Sinha,Gujarat,Ahmedabad,SMB,36465.11,7743.47,0.41,2025-02-08
+CUST-0645,Arjun Prasad,Maharashtra,Aurangabad,SMB,57738.72,11884.7,0.39,2025-02-12
+CUST-0646,Geeta Kapoor,Karnataka,Belagavi,SMB,35579.6,8176.28,0.45,2025-11-25
+CUST-0647,Sunil Murthy,Delhi,Janakpuri,MidMarket,67990.72,15312.87,0.31,2025-10-23
+CUST-0648,Anita Gupta,Maharashtra,Mumbai,SMB,32439.85,8537.77,0.37,2026-01-07
+CUST-0649,Vikram Roy,Delhi,Dwarka,Enterprise,180474.86,27673.2,0.2,2025-08-26
+CUST-0650,Kiran Kamath,Delhi,New Delhi,Enterprise,233313.16,32822.22,0.16,2026-01-16
+CUST-0651,Mohan Desai,Tamil Nadu,Madurai,Startup,21768.79,3847.0,0.32,2025-11-22
+CUST-0652,Shruti Reddy,Telangana,Khammam,Startup,21186.45,5885.0,0.76,2026-01-02
+CUST-0653,Ganesh Ghosh,Delhi,Rohini,SMB,21123.11,8196.58,0.33,2025-08-02
+CUST-0654,Priya Reddy,Karnataka,Bengaluru,MidMarket,87524.08,14411.28,0.15,2025-03-26
+CUST-0655,Rekha Joshi,Telangana,Nizamabad,SMB,38869.96,3284.65,0.37,2025-05-21
+CUST-0656,Suresh Mukherjee,Gujarat,Vadodara,MidMarket,80231.83,9346.78,0.34,2025-10-19
+CUST-0657,Amit Dey,Delhi,Janakpuri,Startup,10392.72,3040.7,0.54,2025-05-07
+CUST-0658,Kiran Arora,Tamil Nadu,Chennai,SMB,76281.43,9090.46,0.25,2026-01-12
+CUST-0659,Mahesh Chatterjee,Rajasthan,Ajmer,Enterprise,224392.53,16981.35,0.22,2025-12-17
+CUST-0660,Vikram Basu,West Bengal,Kolkata,SMB,59539.06,5812.33,0.43,2025-08-24
+CUST-0661,Pallavi Mehta,Tamil Nadu,Coimbatore,MidMarket,103227.58,17273.45,0.3,2025-09-13
+CUST-0662,Vijay Shah,Karnataka,Bengaluru,Startup,24586.9,1614.25,0.57,2025-04-24
+CUST-0663,Neha Mishra,Maharashtra,Nagpur,SMB,30276.5,5802.4,0.56,2025-04-29
+CUST-0664,Smita Iyer,Maharashtra,Nashik,Startup,6765.96,3301.6,0.34,2025-07-14
+CUST-0665,Mohan Kapoor,Telangana,Khammam,SMB,61407.49,7012.53,0.34,2025-08-13
+CUST-0666,Pooja Kapoor,Punjab,Patiala,Enterprise,469113.6,49399.27,0.15,2025-12-14
+CUST-0667,Jyoti Basu,Maharashtra,Nagpur,SMB,62612.95,7188.57,0.29,2025-10-08
+CUST-0668,Vijay Prasad,Karnataka,Hubli,MidMarket,119961.46,15982.17,0.34,2025-08-17
+CUST-0669,Mahesh Nambiar,Maharashtra,Nashik,Enterprise,291460.83,53059.48,0.09,2025-08-05
+CUST-0670,Geeta Murthy,Maharashtra,Mumbai,MidMarket,121427.31,9283.78,0.27,2025-12-25
+CUST-0671,Kiran Hegde,Gujarat,Bhavnagar,MidMarket,112087.48,14575.39,0.39,2025-07-18
+CUST-0672,Priya Bose,Karnataka,Belagavi,MidMarket,148020.52,14806.53,0.2,2025-02-09
+CUST-0673,Suresh Joshi,Rajasthan,Jaipur,SMB,62714.53,10530.73,0.25,2025-03-31
+CUST-0674,Mahesh Das,Delhi,Janakpuri,Enterprise,482353.38,18132.34,0.05,2025-03-31
+CUST-0675,Naresh Chatterjee,Tamil Nadu,Chennai,Enterprise,426813.44,54926.77,0.23,2025-03-11
+CUST-0676,Anita Chopra,Maharashtra,Pune,MidMarket,79150.33,15386.87,0.23,2025-10-17
+CUST-0677,Vinod Das,Tamil Nadu,Madurai,Startup,37783.68,5306.75,0.76,2025-12-16
+CUST-0678,Manoj Rao,Telangana,Khammam,MidMarket,62755.57,11530.22,0.21,2025-04-24
+CUST-0679,Sanjay Rao,Rajasthan,Udaipur,Enterprise,212883.7,16403.31,0.12,2025-04-03
+CUST-0680,Dinesh Patil,Tamil Nadu,Salem,MidMarket,93519.0,10534.59,0.15,2025-11-20
+CUST-0681,Pooja Gowda,Tamil Nadu,Madurai,SMB,29256.04,11977.1,0.47,2025-11-23
+CUST-0682,Anita Menon,Telangana,Warangal,SMB,49202.08,6930.62,0.6,2025-12-18
+CUST-0683,Kavita Kulkarni,West Bengal,Asansol,Startup,29338.67,6581.87,0.61,2025-06-12
+CUST-0684,Usha Sen,Delhi,Janakpuri,MidMarket,72574.09,13097.26,0.1,2025-05-20
+CUST-0685,Shweta Tiwari,Rajasthan,Udaipur,MidMarket,104616.63,12403.64,0.39,2025-04-15
+CUST-0686,Shruti Kapoor,Tamil Nadu,Tiruchirappalli,MidMarket,119049.73,9705.05,0.32,2025-09-09
+CUST-0687,Mahesh Shetty,Maharashtra,Aurangabad,Enterprise,288980.63,48375.87,0.24,2025-12-22
+CUST-0688,Vinod Patil,Delhi,Laxmi Nagar,MidMarket,55277.43,12122.55,0.33,2025-06-04
+CUST-0689,Mahesh Kamath,Uttar Pradesh,Meerut,SMB,45260.97,11645.23,0.52,2025-09-04
+CUST-0690,Sunita Nair,Rajasthan,Ajmer,SMB,63618.3,8073.36,0.22,2025-06-02
+CUST-0691,Manoj Shah,Telangana,Nizamabad,SMB,57459.02,5581.34,0.23,2025-05-17
+CUST-0692,Priya Mishra,Karnataka,Belagavi,MidMarket,135785.84,8170.44,0.13,2025-11-02
+CUST-0693,Manoj Bhatia,Maharashtra,Nashik,MidMarket,67539.94,17390.33,0.17,2025-10-30
+CUST-0694,Ganesh Nair,Tamil Nadu,Chennai,Startup,25844.04,5930.34,0.72,2025-07-03
+CUST-0695,Naresh Chatterjee,Karnataka,Mangaluru,SMB,30037.0,8199.82,0.54,2026-01-03
+CUST-0696,Ashok Pandey,Punjab,Chandigarh,Enterprise,285605.97,36430.44,0.13,2025-05-03
+CUST-0697,Meena Chatterjee,Rajasthan,Kota,MidMarket,64514.98,18443.33,0.1,2025-06-15
+CUST-0698,Rekha Agarwal,Tamil Nadu,Tiruchirappalli,SMB,22461.06,11259.41,0.45,2025-06-23
+CUST-0699,Sunil Kulkarni,West Bengal,Durgapur,MidMarket,130231.64,11064.13,0.28,2025-06-08
+CUST-0700,Naresh Agarwal,Punjab,Patiala,SMB,51197.14,9099.46,0.6,2025-08-23
+CUST-0701,Ravi Rao,Rajasthan,Jaipur,Enterprise,139079.5,19675.83,0.13,2025-10-10
+CUST-0702,Shweta Sinha,Karnataka,Bengaluru,Enterprise,136776.51,57232.75,0.17,2025-10-11
+CUST-0703,Geeta Patil,Maharashtra,Mumbai,Enterprise,341874.31,31918.13,0.2,2025-03-05
+CUST-0704,Seema Joshi,Uttar Pradesh,Kanpur,MidMarket,96695.56,19234.18,0.29,2025-09-11
+CUST-0705,Naresh Sen,Rajasthan,Udaipur,MidMarket,128073.13,11327.45,0.12,2025-07-16
+CUST-0706,Vikram Iyer,Karnataka,Hubli,Enterprise,127759.39,59073.99,0.07,2025-07-13
+CUST-0707,Mohan Kulkarni,Delhi,Dwarka,SMB,45875.21,8525.7,0.24,2025-06-18
+CUST-0708,Harish Pandey,Maharashtra,Mumbai,Enterprise,391018.06,49975.67,0.03,2025-05-21
+CUST-0709,Vijay Kulkarni,Telangana,Hyderabad,SMB,35986.19,9300.5,0.56,2025-04-11
+CUST-0710,Anita Kamath,Rajasthan,Kota,MidMarket,90391.28,16733.21,0.34,2025-12-26
+CUST-0711,Divya Verma,Maharashtra,Nashik,Enterprise,314121.63,59622.06,0.1,2025-08-28
+CUST-0712,Dinesh Iyer,Telangana,Hyderabad,MidMarket,135334.21,12080.75,0.35,2025-09-04
+CUST-0713,Ashok Desai,Karnataka,Bengaluru,Startup,28125.69,2793.22,0.5,2025-12-07
+CUST-0714,Pallavi Saxena,Tamil Nadu,Chennai,Startup,20329.43,2136.79,0.32,2026-01-18
+CUST-0715,Shweta Naidu,Karnataka,Mangaluru,Enterprise,316220.82,28847.89,0.15,2025-06-14
+CUST-0716,Rahul Nair,Tamil Nadu,Madurai,SMB,22568.87,4063.68,0.52,2025-02-23
+CUST-0717,Ganesh Basu,Uttar Pradesh,Meerut,Enterprise,331738.28,56616.71,0.04,2025-11-19
+CUST-0718,Prakash Kulkarni,Maharashtra,Aurangabad,Enterprise,380518.72,20874.2,0.07,2026-01-05
+CUST-0719,Kiran Kumar,Gujarat,Surat,SMB,23837.46,10357.23,0.25,2025-04-01
+CUST-0720,Sunil Verma,Maharashtra,Pune,MidMarket,131152.1,19786.31,0.3,2025-08-17
+CUST-0721,Rajesh Agarwal,Telangana,Warangal,MidMarket,146469.24,10558.78,0.11,2025-11-03
+CUST-0722,Vikram Menon,Maharashtra,Pune,SMB,30083.05,6329.35,0.27,2025-09-28
+CUST-0723,Manoj Nair,Maharashtra,Aurangabad,MidMarket,65775.37,18555.52,0.12,2026-01-27
+CUST-0724,Mohan Patel,Rajasthan,Ajmer,Startup,19567.78,5844.47,0.69,2025-02-10
+CUST-0725,Kavita Mehta,Maharashtra,Nagpur,SMB,44721.88,11442.81,0.44,2026-01-11
+CUST-0726,Geeta Joshi,Rajasthan,Ajmer,Startup,26951.71,5695.5,0.47,2026-01-28
+CUST-0727,Ravi Tiwari,Karnataka,Belagavi,Startup,26662.23,6176.39,0.79,2025-05-16
+CUST-0728,Meena Basu,Punjab,Ludhiana,MidMarket,69371.9,17559.36,0.31,2025-06-02
+CUST-0729,Prakash Joshi,Maharashtra,Mumbai,Enterprise,245677.23,24431.54,0.09,2025-03-21
+CUST-0730,Lata Basu,Maharashtra,Mumbai,Startup,11156.07,5712.95,0.54,2025-12-02
+CUST-0731,Priya Tiwari,Rajasthan,Ajmer,SMB,45143.98,9723.78,0.56,2025-10-05
+CUST-0732,Naresh Gupta,Tamil Nadu,Chennai,MidMarket,91259.55,10399.47,0.37,2025-12-24
+CUST-0733,Shruti Naidu,Gujarat,Rajkot,Enterprise,471154.85,35474.59,0.12,2025-11-22
+CUST-0734,Mahesh Malhotra,Karnataka,Hubli,Startup,12077.38,1763.27,0.65,2025-12-31
+CUST-0735,Arun Singh,Maharashtra,Nashik,MidMarket,67120.13,12122.91,0.37,2025-03-27
+CUST-0736,Sunita Patil,Uttar Pradesh,Kanpur,SMB,53165.34,5067.32,0.36,2025-05-08
+CUST-0737,Prakash Mehta,Telangana,Karimnagar,MidMarket,123001.78,16834.15,0.17,2025-08-16
+CUST-0738,Ramesh Naidu,Karnataka,Belagavi,Startup,36981.42,6389.51,0.51,2026-01-08
+CUST-0739,Leena Pillai,Punjab,Patiala,Enterprise,312448.69,36567.12,0.21,2025-12-11
+CUST-0740,Smita Nambiar,Karnataka,Belagavi,SMB,61589.59,6659.56,0.29,2025-07-31
+CUST-0741,Swati Tiwari,Telangana,Hyderabad,Enterprise,367614.24,22281.13,0.13,2025-04-13
+CUST-0742,Anil Naidu,Maharashtra,Nashik,MidMarket,63862.39,16437.62,0.16,2025-07-25
+CUST-0743,Pallavi Basu,Rajasthan,Jaipur,Startup,7474.45,6360.61,0.47,2026-01-14
+CUST-0744,Swati Sen,Punjab,Patiala,SMB,67668.73,10089.23,0.23,2025-08-12
+CUST-0745,Anil Iyer,Delhi,Rohini,Startup,8883.83,3193.55,0.61,2025-07-27
+CUST-0746,Nikhil Joshi,Telangana,Hyderabad,SMB,66414.53,4245.65,0.33,2025-04-29
+CUST-0747,Rajesh Kulkarni,Gujarat,Bhavnagar,Startup,29599.53,5519.04,0.68,2025-08-19
+CUST-0748,Anjali Mishra,Delhi,Janakpuri,MidMarket,56336.92,12142.72,0.25,2025-05-06
+CUST-0749,Rajesh Pillai,Rajasthan,Ajmer,Startup,20819.24,3208.88,0.64,2025-02-10
+CUST-0750,Priya Desai,Uttar Pradesh,Varanasi,Enterprise,256273.0,23046.53,0.24,2025-12-22
+CUST-0751,Deepa Shah,Karnataka,Mysuru,MidMarket,137499.31,14248.25,0.29,2025-09-02
+CUST-0752,Poonam Agarwal,Delhi,Dwarka,MidMarket,92013.0,16852.51,0.11,2025-10-26
+CUST-0753,Priya Sharma,West Bengal,Howrah,SMB,51177.23,6022.9,0.43,2025-03-01
+CUST-0754,Ashok Das,Gujarat,Bhavnagar,SMB,46715.38,5736.74,0.25,2025-08-27
+CUST-0755,Sunita Pandey,Karnataka,Hubli,Startup,31941.24,1283.91,0.48,2025-06-11
+CUST-0756,Sunita Prasad,Uttar Pradesh,Meerut,MidMarket,147320.61,18071.98,0.31,2025-02-23
+CUST-0757,Vijay Shah,Karnataka,Bengaluru,Startup,25108.38,3645.33,0.48,2025-10-17
+CUST-0758,Ravi Kapoor,Maharashtra,Nagpur,Startup,10178.05,3690.57,0.79,2025-05-02
+CUST-0759,Kiran Gupta,Uttar Pradesh,Varanasi,Startup,31898.14,6686.73,0.76,2025-11-12
+CUST-0760,Anita Bhatia,Delhi,Laxmi Nagar,MidMarket,120545.14,13686.93,0.19,2025-04-12
+CUST-0761,Nisha Reddy,West Bengal,Asansol,MidMarket,61231.56,13747.77,0.11,2025-02-17
+CUST-0762,Ravi Gupta,Tamil Nadu,Salem,SMB,33221.89,6216.54,0.33,2025-03-25
+CUST-0763,Ashok Desai,Telangana,Warangal,SMB,66025.71,4761.44,0.23,2025-06-16
+CUST-0764,Vinod Jain,Uttar Pradesh,Meerut,MidMarket,99046.54,15238.06,0.25,2026-01-02
+CUST-0765,Nisha Mukherjee,Tamil Nadu,Salem,MidMarket,87283.12,11415.8,0.21,2025-06-16
+CUST-0766,Ravi Patel,Karnataka,Mangaluru,SMB,44936.59,6982.54,0.27,2025-06-27
+CUST-0767,Shweta Biswas,Maharashtra,Aurangabad,SMB,28618.36,5729.08,0.6,2025-05-07
+CUST-0768,Vikram Menon,Uttar Pradesh,Meerut,SMB,25306.9,6685.15,0.57,2025-07-02
+CUST-0769,Mohan Gowda,Gujarat,Bhavnagar,SMB,28215.62,4674.06,0.35,2025-04-22
+CUST-0770,Prakash Nair,West Bengal,Durgapur,SMB,38234.86,8033.53,0.39,2026-01-17
+CUST-0771,Anita Reddy,Karnataka,Mangaluru,Enterprise,366365.38,27946.01,0.07,2025-02-12
+CUST-0772,Ashok Tiwari,Maharashtra,Nagpur,MidMarket,147062.53,15186.7,0.21,2025-05-29
+CUST-0773,Seema Sen,West Bengal,Asansol,Startup,33639.83,3239.21,0.67,2026-01-22
+CUST-0774,Rina Shah,Telangana,Warangal,MidMarket,137831.73,9625.97,0.15,2025-09-13
+CUST-0775,Nikhil Biswas,Telangana,Nizamabad,Enterprise,216665.64,43752.59,0.05,2025-10-23
+CUST-0776,Naresh Patil,Karnataka,Bengaluru,SMB,30028.16,5903.46,0.33,2025-02-14
+CUST-0777,Kiran Mishra,Rajasthan,Udaipur,Enterprise,332018.66,52049.17,0.03,2025-05-10
+CUST-0778,Swati Mukherjee,Punjab,Jalandhar,MidMarket,141078.8,9229.01,0.15,2025-10-09
+CUST-0779,Pooja Gowda,Telangana,Khammam,SMB,62752.83,9320.38,0.52,2025-07-01
+CUST-0780,Mahesh Menon,Maharashtra,Pune,Startup,21783.14,2869.44,0.48,2025-06-18
+CUST-0781,Geeta Shetty,Punjab,Amritsar,Enterprise,221873.7,48500.71,0.06,2025-11-26
+CUST-0782,Jyoti Reddy,Rajasthan,Udaipur,Enterprise,152087.3,18537.22,0.18,2025-12-04
+CUST-0783,Priya Sharma,Punjab,Jalandhar,Enterprise,143126.95,50687.48,0.14,2025-12-31
+CUST-0784,Shruti Gupta,Uttar Pradesh,Lucknow,Enterprise,367034.57,48954.76,0.2,2025-03-28
+CUST-0785,Arjun Naidu,Uttar Pradesh,Kanpur,SMB,21755.55,4310.01,0.5,2025-09-10
+CUST-0786,Manoj Roy,Tamil Nadu,Tiruchirappalli,SMB,56777.39,7544.18,0.23,2025-04-09
+CUST-0787,Lata Rao,Delhi,Dwarka,Startup,11012.07,5524.11,0.3,2025-12-11
+CUST-0788,Arjun Kamath,West Bengal,Asansol,MidMarket,108938.06,13275.99,0.39,2025-10-30
+CUST-0789,Anjali Chatterjee,Gujarat,Bhavnagar,MidMarket,61284.55,19815.35,0.14,2025-12-05
+CUST-0790,Ganesh Singh,Delhi,Rohini,SMB,53427.93,3365.48,0.33,2025-12-02
+CUST-0791,Rekha Sinha,Gujarat,Vadodara,SMB,70465.41,5032.86,0.36,2025-06-25
+CUST-0792,Pooja Menon,Uttar Pradesh,Varanasi,Startup,17860.45,1076.72,0.64,2025-02-20
+CUST-0793,Deepa Banerjee,Gujarat,Ahmedabad,Enterprise,257924.58,46276.67,0.25,2025-11-05
+CUST-0794,Priya Mukherjee,Uttar Pradesh,Agra,MidMarket,134402.95,12851.47,0.17,2025-06-27
+CUST-0795,Shweta Nambiar,Karnataka,Belagavi,SMB,65378.18,10208.86,0.58,2025-08-01
+CUST-0796,Shruti Jain,Telangana,Karimnagar,Startup,22899.51,1884.24,0.53,2025-11-29
+CUST-0797,Rina Nambiar,Delhi,Dwarka,Enterprise,395119.34,52364.06,0.14,2026-01-17
+CUST-0798,Mohan Chatterjee,Telangana,Nizamabad,Enterprise,348786.7,19335.01,0.05,2025-05-09
+CUST-0799,Naresh Nambiar,Punjab,Ludhiana,MidMarket,99789.9,14057.54,0.26,2025-04-29
+CUST-0800,Divya Sharma,Uttar Pradesh,Lucknow,Startup,35804.4,1714.8,0.53,2025-07-22
+CUST-0801,Smita Basu,Maharashtra,Pune,SMB,71621.64,5727.4,0.48,2025-05-24
+CUST-0802,Ramesh Singh,Tamil Nadu,Salem,MidMarket,60938.2,16100.29,0.3,2025-02-14
+CUST-0803,Divya Murthy,Gujarat,Bhavnagar,Startup,22733.98,3348.31,0.55,2025-07-21
+CUST-0804,Sunil Agarwal,Tamil Nadu,Madurai,MidMarket,52814.7,8541.42,0.35,2025-08-05
+CUST-0805,Anil Naidu,Maharashtra,Nagpur,MidMarket,92814.82,19903.35,0.22,2026-01-02
+CUST-0806,Nisha Tiwari,Karnataka,Hubli,SMB,74623.34,3589.5,0.32,2025-08-11
+CUST-0807,Sunita Sharma,Delhi,New Delhi,MidMarket,136336.85,14816.59,0.37,2025-09-16
+CUST-0808,Rahul Saxena,Gujarat,Ahmedabad,Startup,18220.82,3341.8,0.59,2025-05-25
+CUST-0809,Deepa Saxena,Rajasthan,Udaipur,MidMarket,131145.72,16008.65,0.15,2025-08-30
+CUST-0810,Nikhil Sen,Karnataka,Bengaluru,SMB,52150.04,5586.2,0.22,2025-04-12
+CUST-0811,Dinesh Verma,Telangana,Hyderabad,SMB,54691.59,8326.78,0.31,2025-04-15
+CUST-0812,Ganesh Pillai,Gujarat,Vadodara,SMB,59092.21,5716.62,0.52,2025-06-23
+CUST-0813,Nisha Hegde,Tamil Nadu,Salem,MidMarket,112496.39,13438.74,0.33,2025-10-30
+CUST-0814,Rahul Patil,Rajasthan,Jodhpur,SMB,32777.17,11659.05,0.5,2025-06-05
+CUST-0815,Arun Patil,Delhi,Laxmi Nagar,Startup,36739.25,6607.82,0.66,2025-12-31
+CUST-0816,Ganesh Desai,Tamil Nadu,Coimbatore,MidMarket,124643.35,17186.36,0.35,2025-07-04
+CUST-0817,Neha Menon,Telangana,Karimnagar,MidMarket,78704.46,9927.01,0.31,2025-10-02
+CUST-0818,Dinesh Tiwari,Maharashtra,Pune,Enterprise,418817.9,28974.33,0.14,2025-06-21
+CUST-0819,Ramesh Kulkarni,Uttar Pradesh,Kanpur,Enterprise,154572.25,26627.86,0.21,2025-02-27
+CUST-0820,Ravi Joshi,Telangana,Hyderabad,Startup,22004.47,1119.45,0.73,2025-12-19
+CUST-0821,Neha Raju,Tamil Nadu,Chennai,Startup,19245.24,3180.61,0.63,2025-12-15
+CUST-0822,Dinesh Malhotra,West Bengal,Howrah,Enterprise,393792.16,56982.1,0.14,2025-04-08
+CUST-0823,Naresh Shetty,Karnataka,Bengaluru,MidMarket,62227.68,17680.25,0.2,2025-04-06
+CUST-0824,Anil Chatterjee,West Bengal,Howrah,Startup,12630.29,1640.88,0.41,2025-09-12
+CUST-0825,Smita Biswas,Karnataka,Belagavi,Enterprise,313387.99,46482.8,0.05,2025-04-26
+CUST-0826,Ramesh Pillai,Rajasthan,Udaipur,Startup,37794.03,3177.99,0.66,2025-08-26
+CUST-0827,Rahul Kulkarni,Uttar Pradesh,Meerut,Enterprise,395779.89,50952.36,0.04,2025-02-21
+CUST-0828,Suresh Pandey,Delhi,Rohini,SMB,62037.01,11128.41,0.47,2025-05-02
+CUST-0829,Suresh Dey,Tamil Nadu,Salem,Startup,37127.43,2805.33,0.77,2025-10-02
+CUST-0830,Kiran Mehta,West Bengal,Howrah,Startup,27097.34,6276.8,0.68,2025-07-06
+CUST-0831,Leena Mishra,West Bengal,Asansol,MidMarket,91296.13,18093.96,0.32,2025-12-10
+CUST-0832,Sunita Saxena,Karnataka,Bengaluru,MidMarket,110211.59,17761.14,0.32,2025-06-12
+CUST-0833,Jyoti Sharma,Punjab,Ludhiana,SMB,67461.16,4224.83,0.36,2025-03-15
+CUST-0834,Kiran Das,Telangana,Hyderabad,Enterprise,306546.36,58634.91,0.21,2025-11-25
+CUST-0835,Geeta Agarwal,Gujarat,Vadodara,MidMarket,137350.58,9602.12,0.15,2025-04-02
+CUST-0836,Neha Sinha,Karnataka,Mangaluru,MidMarket,89349.42,12527.84,0.35,2025-04-13
+CUST-0837,Meena Sharma,Uttar Pradesh,Meerut,SMB,57597.64,11161.6,0.59,2025-10-21
+CUST-0838,Rina Saxena,West Bengal,Kolkata,MidMarket,92890.34,11121.89,0.13,2025-07-26
+CUST-0839,Sunita Murthy,Maharashtra,Aurangabad,MidMarket,141998.9,13444.49,0.3,2025-12-01
+CUST-0840,Meena Kapoor,Karnataka,Hubli,MidMarket,99416.82,9562.39,0.36,2025-03-29
+CUST-0841,Arjun Sinha,Rajasthan,Jodhpur,MidMarket,90852.41,9751.31,0.19,2025-09-18
+CUST-0842,Suresh Prasad,Gujarat,Surat,MidMarket,118426.71,13497.97,0.1,2025-11-23
+CUST-0843,Neha Saxena,Tamil Nadu,Coimbatore,SMB,62507.19,9624.94,0.3,2025-12-13
+CUST-0844,Ravi Iyer,Maharashtra,Pune,MidMarket,85430.17,15276.49,0.3,2025-03-30
+CUST-0845,Harish Bhatia,West Bengal,Kolkata,MidMarket,111965.79,11630.09,0.22,2025-07-25
+CUST-0846,Kavita Gowda,Maharashtra,Pune,MidMarket,100374.67,19163.92,0.36,2025-11-24
+CUST-0847,Amit Das,Rajasthan,Kota,Enterprise,146736.82,16987.3,0.06,2025-09-09
+CUST-0848,Anil Mukherjee,Uttar Pradesh,Agra,Startup,14212.57,5977.54,0.76,2025-05-11
+CUST-0849,Neha Sen,Uttar Pradesh,Agra,SMB,49476.49,11550.46,0.42,2025-02-28
+CUST-0850,Pallavi Dey,Maharashtra,Pune,Enterprise,173256.53,36161.14,0.07,2025-06-05
+CUST-0851,Ramesh Gupta,Uttar Pradesh,Varanasi,Enterprise,242608.05,46906.31,0.14,2025-05-23
+CUST-0852,Rajesh Malhotra,West Bengal,Kolkata,MidMarket,70373.37,11409.4,0.35,2025-05-15
+CUST-0853,Arun Murthy,West Bengal,Siliguri,MidMarket,149800.46,8049.51,0.33,2025-10-30
+CUST-0854,Poonam Menon,Karnataka,Mangaluru,SMB,73242.06,3233.66,0.47,2025-02-16
+CUST-0855,Rajesh Banerjee,Tamil Nadu,Chennai,SMB,29226.53,3729.57,0.53,2025-02-27
+CUST-0856,Shruti Basu,Telangana,Nizamabad,SMB,20348.32,11727.93,0.46,2025-06-13
+CUST-0857,Neha Malhotra,Uttar Pradesh,Meerut,Enterprise,445311.54,51070.11,0.09,2026-01-02
+CUST-0858,Anil Menon,Delhi,Laxmi Nagar,MidMarket,89885.85,10136.13,0.39,2025-07-10
+CUST-0859,Amit Sharma,West Bengal,Howrah,MidMarket,90239.62,15766.02,0.39,2025-11-13
+CUST-0860,Rajesh Ghosh,Delhi,Janakpuri,SMB,75301.99,11133.61,0.44,2025-07-31
+CUST-0861,Nisha Kumar,West Bengal,Siliguri,Enterprise,278176.97,32464.03,0.09,2025-03-29
+CUST-0862,Ramesh Patel,Punjab,Amritsar,SMB,46046.36,6834.15,0.22,2025-08-09
+CUST-0863,Mahesh Agarwal,Karnataka,Mysuru,Startup,23454.75,4883.35,0.34,2025-06-05
+CUST-0864,Ramesh Patel,Uttar Pradesh,Varanasi,MidMarket,148418.62,16211.77,0.19,2025-09-25
+CUST-0865,Ganesh Sen,Tamil Nadu,Chennai,SMB,75038.12,7620.73,0.4,2025-07-03
+CUST-0866,Deepa Basu,Rajasthan,Ajmer,SMB,41327.46,8270.11,0.51,2026-01-22
+CUST-0867,Rajesh Bhatia,Rajasthan,Jodhpur,SMB,70574.59,3407.33,0.37,2025-02-04
+CUST-0868,Kiran Das,Telangana,Karimnagar,SMB,46996.87,10270.51,0.34,2025-10-27
+CUST-0869,Arjun Joshi,Maharashtra,Aurangabad,MidMarket,117340.88,13205.59,0.11,2025-07-12
+CUST-0870,Rajesh Rao,Karnataka,Mangaluru,MidMarket,90509.16,15892.61,0.32,2025-05-26
+CUST-0871,Kiran Prasad,West Bengal,Siliguri,MidMarket,117380.31,16283.52,0.22,2025-08-29
+CUST-0872,Amit Singh,Maharashtra,Pune,Enterprise,106354.1,58673.42,0.22,2025-10-15
+CUST-0873,Shruti Kulkarni,Maharashtra,Pune,MidMarket,112605.92,17480.14,0.16,2025-08-29
+CUST-0874,Naresh Basu,Maharashtra,Nashik,Enterprise,166442.2,21859.0,0.18,2025-05-27
+CUST-0875,Shruti Sharma,West Bengal,Siliguri,MidMarket,79483.14,17953.41,0.22,2025-08-13
+CUST-0876,Anita Kumar,Telangana,Karimnagar,Startup,34701.57,5422.47,0.6,2025-04-22
+CUST-0877,Swati Nair,Gujarat,Rajkot,SMB,63476.85,11417.53,0.56,2025-05-26
+CUST-0878,Meena Kapoor,Maharashtra,Mumbai,MidMarket,81585.02,8762.13,0.37,2025-07-01
+CUST-0879,Shruti Gupta,Delhi,Rohini,MidMarket,93623.0,9936.0,0.32,2025-06-04
+CUST-0880,Anjali Dey,Karnataka,Mysuru,SMB,61098.45,11295.62,0.54,2025-02-28
+CUST-0881,Mahesh Singh,West Bengal,Asansol,Startup,34157.83,5038.64,0.67,2025-06-03
+CUST-0882,Sunita Prasad,Karnataka,Bengaluru,SMB,27745.79,4795.36,0.44,2025-12-10
+CUST-0883,Poonam Nambiar,Tamil Nadu,Coimbatore,SMB,79955.67,6229.08,0.3,2025-02-18
+CUST-0884,Sunita Joshi,West Bengal,Siliguri,Enterprise,125466.23,34377.92,0.17,2025-11-30
+CUST-0885,Ravi Verma,Gujarat,Vadodara,SMB,66162.43,9930.85,0.42,2025-11-14
+CUST-0886,Jyoti Kamath,Telangana,Hyderabad,SMB,75597.93,6940.44,0.38,2025-12-05
+CUST-0887,Deepa Prasad,Telangana,Hyderabad,SMB,22518.17,3948.7,0.45,2025-10-17
+CUST-0888,Nikhil Shah,Punjab,Jalandhar,SMB,49903.46,10834.43,0.26,2025-07-28
+CUST-0889,Vikram Singh,Maharashtra,Pune,MidMarket,91574.98,17228.4,0.17,2025-06-02
+CUST-0890,Vikram Sinha,Delhi,New Delhi,MidMarket,121519.97,12980.1,0.29,2025-09-27
+CUST-0891,Vijay Chopra,Punjab,Jalandhar,SMB,28279.66,6859.41,0.57,2025-06-10
+CUST-0892,Ganesh Agarwal,Tamil Nadu,Chennai,MidMarket,127015.19,16611.51,0.26,2025-12-26
+CUST-0893,Amit Bose,Tamil Nadu,Coimbatore,MidMarket,89326.63,8445.12,0.38,2025-11-14
+CUST-0894,Seema Iyer,Uttar Pradesh,Meerut,Startup,19675.69,6314.7,0.65,2025-08-28
+CUST-0895,Shweta Bhatia,Tamil Nadu,Madurai,Enterprise,211912.3,38750.63,0.23,2025-02-06
+CUST-0896,Dinesh Dey,Telangana,Khammam,SMB,57091.25,6979.29,0.34,2025-03-04
+CUST-0897,Dinesh Arora,Karnataka,Hubli,Enterprise,314973.4,32549.71,0.19,2025-11-27
+CUST-0898,Ganesh Hegde,Karnataka,Bengaluru,SMB,38735.14,6066.38,0.45,2026-01-19
+CUST-0899,Rahul Hegde,Telangana,Warangal,SMB,38236.53,6804.71,0.4,2025-12-31
+CUST-0900,Nikhil Pandey,Telangana,Nizamabad,Enterprise,402623.98,57360.44,0.13,2025-04-12
+CUST-0901,Anil Rao,Gujarat,Surat,SMB,79340.0,8090.38,0.56,2025-03-15
+CUST-0902,Nisha Hegde,West Bengal,Howrah,MidMarket,78453.55,17417.47,0.31,2025-02-20
+CUST-0903,Kavita Kapoor,Tamil Nadu,Coimbatore,Enterprise,306580.73,23664.99,0.2,2025-06-12
+CUST-0904,Deepa Reddy,Rajasthan,Kota,Enterprise,124877.47,54982.92,0.13,2025-06-16
+CUST-0905,Priya Mukherjee,Rajasthan,Kota,SMB,51136.7,6553.04,0.31,2025-05-20
+CUST-0906,Pallavi Sen,Uttar Pradesh,Varanasi,SMB,45015.34,4465.58,0.4,2025-05-27
+CUST-0907,Harish Basu,Maharashtra,Aurangabad,Startup,9132.04,2275.86,0.54,2025-11-11
+CUST-0908,Ravi Mukherjee,Uttar Pradesh,Lucknow,SMB,44517.19,4087.8,0.43,2026-01-10
+CUST-0909,Ganesh Reddy,Maharashtra,Nagpur,Startup,15614.1,3915.55,0.7,2025-11-19
+CUST-0910,Manoj Biswas,Maharashtra,Nagpur,Startup,12545.35,5914.75,0.54,2025-11-29
+CUST-0911,Ravi Roy,Maharashtra,Mumbai,MidMarket,107305.91,14789.17,0.37,2025-07-21
+CUST-0912,Shruti Malhotra,West Bengal,Howrah,SMB,50285.83,7148.43,0.38,2025-06-15
+CUST-0913,Vijay Malhotra,Tamil Nadu,Tiruchirappalli,SMB,44577.7,5095.4,0.36,2025-04-29
+CUST-0914,Leena Jain,West Bengal,Durgapur,SMB,71957.21,9364.88,0.43,2025-02-02
+CUST-0915,Kiran Gowda,Telangana,Khammam,Enterprise,482067.33,39382.54,0.2,2025-04-14
+CUST-0916,Ganesh Desai,Punjab,Patiala,Startup,9209.91,6617.09,0.39,2026-01-21
+CUST-0917,Arun Mehta,Karnataka,Belagavi,MidMarket,130692.1,15282.26,0.22,2026-01-07
+CUST-0918,Prakash Sharma,Tamil Nadu,Coimbatore,MidMarket,135964.84,11808.59,0.18,2025-12-03
+CUST-0919,Deepa Hegde,Karnataka,Mysuru,Enterprise,407321.88,21940.23,0.24,2025-02-17
+CUST-0920,Sunita Iyer,Telangana,Nizamabad,Enterprise,385320.25,28411.1,0.05,2025-11-19
+CUST-0921,Poonam Das,Karnataka,Bengaluru,Enterprise,195849.19,41865.21,0.08,2025-05-15
+CUST-0922,Lata Kamath,Tamil Nadu,Chennai,MidMarket,81833.64,14637.45,0.12,2026-01-16
+CUST-0923,Poonam Patil,Karnataka,Bengaluru,MidMarket,146347.47,16101.17,0.17,2025-04-21
+CUST-0924,Ashok Singh,Tamil Nadu,Salem,MidMarket,134627.79,14005.19,0.33,2025-11-19
+CUST-0925,Nikhil Hegde,Uttar Pradesh,Kanpur,SMB,45425.15,11203.43,0.38,2026-01-30
+CUST-0926,Mahesh Prasad,Karnataka,Mysuru,Enterprise,473402.73,36698.38,0.16,2025-02-16
+CUST-0927,Rekha Roy,West Bengal,Howrah,SMB,50619.71,3409.36,0.5,2025-04-17
+CUST-0928,Priya Ghosh,Maharashtra,Mumbai,SMB,63504.43,11989.39,0.55,2025-10-15
+CUST-0929,Sunil Kamath,Uttar Pradesh,Agra,Startup,38089.3,4811.02,0.79,2025-02-02
+CUST-0930,Smita Mishra,Karnataka,Hubli,MidMarket,95979.93,15194.16,0.1,2025-02-10
+CUST-0931,Kavita Kulkarni,Uttar Pradesh,Meerut,MidMarket,140144.5,16072.48,0.22,2025-02-08
+CUST-0932,Harish Nambiar,Punjab,Patiala,Enterprise,450688.12,44306.99,0.15,2025-02-21
+CUST-0933,Smita Agarwal,Maharashtra,Nashik,SMB,41477.94,4594.68,0.51,2025-02-08
+CUST-0934,Anita Gupta,Gujarat,Surat,MidMarket,72152.08,8237.38,0.18,2025-02-01
+CUST-0935,Anjali Desai,Maharashtra,Aurangabad,SMB,68504.87,4990.33,0.59,2025-07-29
+CUST-0936,Leena Mishra,Delhi,Laxmi Nagar,MidMarket,69608.68,17853.48,0.22,2025-09-10
+CUST-0937,Seema Kamath,Delhi,Laxmi Nagar,Enterprise,395525.93,45247.9,0.16,2025-11-02
+CUST-0938,Priya Naidu,Maharashtra,Mumbai,Enterprise,473425.36,53496.55,0.22,2025-09-12
+CUST-0939,Pooja Agarwal,Maharashtra,Aurangabad,SMB,60840.82,10947.92,0.2,2025-06-26
+CUST-0940,Ashok Agarwal,Uttar Pradesh,Lucknow,Startup,16304.97,6066.05,0.5,2025-11-29
+CUST-0941,Vinod Shetty,Gujarat,Vadodara,SMB,22607.88,9490.98,0.22,2025-06-29
+CUST-0942,Divya Dey,Tamil Nadu,Salem,Enterprise,132723.56,40731.88,0.04,2025-10-07
+CUST-0943,Jyoti Sen,Uttar Pradesh,Kanpur,Enterprise,231689.85,17827.99,0.17,2026-01-16
+CUST-0944,Shruti Sen,West Bengal,Siliguri,SMB,76103.65,10564.57,0.3,2025-06-02
+CUST-0945,Suresh Bose,West Bengal,Durgapur,SMB,34204.62,3656.2,0.44,2025-06-20
+CUST-0946,Lata Kumar,Telangana,Khammam,Enterprise,489810.23,56252.15,0.11,2025-02-09
+CUST-0947,Priya Singh,Maharashtra,Nashik,Enterprise,344295.46,34432.75,0.05,2026-01-02
+CUST-0948,Ravi Iyer,Tamil Nadu,Salem,MidMarket,111730.2,12933.3,0.36,2025-02-27
+CUST-0949,Sunil Rao,Gujarat,Rajkot,SMB,72796.29,8573.07,0.34,2025-02-19
+CUST-0950,Rahul Basu,Delhi,Laxmi Nagar,Enterprise,141075.86,41782.88,0.04,2025-10-23
+CUST-0951,Seema Singh,Telangana,Nizamabad,MidMarket,98139.93,15450.21,0.16,2025-11-21
+CUST-0952,Leena Iyer,Maharashtra,Aurangabad,MidMarket,145974.14,17052.48,0.19,2025-04-28
+CUST-0953,Naresh Reddy,Maharashtra,Nagpur,SMB,37463.84,11732.44,0.41,2025-02-28
+CUST-0954,Vinod Reddy,Maharashtra,Aurangabad,SMB,53567.0,3491.47,0.34,2025-10-20
+CUST-0955,Pallavi Desai,Punjab,Amritsar,Enterprise,290290.02,46132.85,0.13,2025-02-10
+CUST-0956,Vikram Naidu,Telangana,Nizamabad,SMB,45121.72,4460.52,0.38,2026-01-09
+CUST-0957,Prakash Verma,Uttar Pradesh,Kanpur,SMB,47992.21,4918.25,0.39,2025-08-14
+CUST-0958,Anil Chatterjee,Karnataka,Mysuru,SMB,20403.52,3089.03,0.34,2025-04-21
+CUST-0959,Rajesh Reddy,Karnataka,Mysuru,SMB,74762.53,6239.18,0.59,2025-10-21
+CUST-0960,Pooja Sinha,Karnataka,Hubli,SMB,40389.05,7990.54,0.27,2026-01-19
+CUST-0961,Mohan Pandey,Uttar Pradesh,Lucknow,SMB,28234.61,8893.82,0.55,2025-08-10
+CUST-0962,Arjun Ghosh,Gujarat,Vadodara,SMB,59654.52,11470.46,0.59,2025-03-17
+CUST-0963,Ramesh Kapoor,Maharashtra,Pune,Startup,9577.81,2137.85,0.57,2025-02-09
+CUST-0964,Nikhil Das,Telangana,Warangal,Startup,31707.88,4523.96,0.73,2025-09-02
+CUST-0965,Vijay Das,Karnataka,Hubli,Startup,34802.59,6810.31,0.74,2025-10-15
+CUST-0966,Shweta Patel,Punjab,Patiala,Enterprise,303445.52,48808.86,0.17,2025-05-15
+CUST-0967,Nikhil Nambiar,Delhi,Dwarka,MidMarket,87387.87,16334.12,0.31,2025-05-22
+CUST-0968,Shruti Mishra,Telangana,Khammam,SMB,32431.98,11053.96,0.38,2025-10-02
+CUST-0969,Dinesh Mehta,Tamil Nadu,Salem,SMB,76129.93,6366.97,0.42,2025-11-23
+CUST-0970,Lata Patel,Tamil Nadu,Tiruchirappalli,MidMarket,108396.22,13583.04,0.29,2025-06-26
+CUST-0971,Smita Basu,Gujarat,Vadodara,SMB,39021.23,6441.34,0.27,2025-10-03
+CUST-0972,Rina Kulkarni,Maharashtra,Mumbai,MidMarket,100176.49,14559.82,0.12,2025-09-11
+CUST-0973,Meena Kumar,Maharashtra,Nagpur,Enterprise,180122.64,23849.08,0.1,2025-08-29
+CUST-0974,Anil Arora,Rajasthan,Udaipur,Enterprise,341613.62,21203.93,0.22,2025-04-27
+CUST-0975,Rina Rao,Punjab,Amritsar,SMB,66987.7,6634.3,0.36,2025-04-09
+CUST-0976,Lata Kulkarni,Maharashtra,Aurangabad,Startup,38302.11,6192.8,0.41,2025-10-15
+CUST-0977,Shruti Verma,Delhi,Laxmi Nagar,SMB,63350.62,7152.61,0.52,2025-08-23
+CUST-0978,Pooja Sen,Punjab,Jalandhar,MidMarket,94997.19,14701.36,0.21,2025-04-10
+CUST-0979,Kavita Ghosh,Uttar Pradesh,Lucknow,MidMarket,115884.81,12255.95,0.17,2025-06-27
+CUST-0980,Vinod Chopra,Gujarat,Bhavnagar,MidMarket,108695.51,14810.93,0.11,2025-11-20
+CUST-0981,Vijay Bose,Telangana,Khammam,Startup,25085.76,3345.32,0.49,2025-07-14
+CUST-0982,Priya Hegde,Tamil Nadu,Salem,Enterprise,327806.0,35319.09,0.23,2025-12-14
+CUST-0983,Sunita Kumar,Rajasthan,Jodhpur,Enterprise,375609.82,36987.6,0.07,2025-12-26
+CUST-0984,Rekha Sinha,Karnataka,Hubli,SMB,24198.77,3517.08,0.41,2025-11-04
+CUST-0985,Neha Biswas,Tamil Nadu,Chennai,Enterprise,267365.28,48441.42,0.12,2025-10-17
+CUST-0986,Kavita Mehta,Tamil Nadu,Salem,Enterprise,330036.55,28964.12,0.07,2025-02-14
+CUST-0987,Mahesh Mishra,Karnataka,Mysuru,MidMarket,132458.26,15258.18,0.17,2025-08-15
+CUST-0988,Seema Nambiar,Gujarat,Bhavnagar,Enterprise,136441.07,44083.46,0.23,2025-08-06
+CUST-0989,Jyoti Kapoor,Punjab,Jalandhar,SMB,68599.09,4576.14,0.3,2025-03-20
+CUST-0990,Shweta Sen,Gujarat,Surat,SMB,25732.05,9287.8,0.22,2025-11-11
+CUST-0991,Arun Patil,Delhi,New Delhi,SMB,63344.56,4955.29,0.4,2025-04-22
+CUST-0992,Rajesh Mukherjee,Maharashtra,Mumbai,SMB,66770.64,6690.86,0.27,2025-10-16
+CUST-0993,Usha Nair,Gujarat,Ahmedabad,SMB,60537.32,7157.14,0.34,2025-07-10
+CUST-0994,Pooja Banerjee,Maharashtra,Nagpur,Enterprise,466854.79,29719.97,0.19,2025-05-27
+CUST-0995,Mahesh Menon,Maharashtra,Pune,SMB,46263.42,7237.09,0.31,2025-11-09
+CUST-0996,Sunita Sharma,Telangana,Warangal,MidMarket,103465.38,12690.19,0.12,2026-01-25
+CUST-0997,Vinod Mishra,Maharashtra,Nagpur,Enterprise,385764.91,55170.95,0.15,2025-06-18
+CUST-0998,Jyoti Iyer,West Bengal,Siliguri,SMB,62984.63,11073.09,0.36,2025-08-26
+CUST-0999,Smita Iyer,Telangana,Hyderabad,SMB,66026.85,11359.38,0.35,2025-09-30
+CUST-1000,Pooja Patel,Maharashtra,Mumbai,Startup,16799.08,2152.91,0.63,2025-10-10

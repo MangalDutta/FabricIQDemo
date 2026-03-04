@@ -381,6 +381,62 @@ def upload_csv_to_onelake(
 
 # ─── Load table ──────────────────────────────────────────────────────────────
 
+def _do_load_table_request(
+    workspace_id: str,
+    lakehouse_id: str,
+    table_name: str,
+    payload: Dict[str, Any],
+    fabric_token: str,
+) -> requests.Response:
+    """POST to the Load Table endpoint and return the response (does not raise)."""
+    url = (
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+        f"/lakehouses/{lakehouse_id}/tables/{table_name}/load"
+    )
+    return requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {fabric_token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=120,
+    )
+
+
+def _handle_load_response(resp: requests.Response, table_name: str, fabric_token: str) -> bool:
+    """
+    Handle a Load Table response.
+    Returns True if load succeeded/accepted, False if failed.
+    """
+    if resp.status_code == 200:
+        print(f"   ✓ Table '{table_name}' loaded (synchronous).")
+        return True
+
+    if resp.status_code == 202:
+        # Async operation - extract operation id
+        operation_id = (
+            resp.headers.get("x-ms-operation-id")
+            or resp.headers.get("x-ms-operationid")
+            or (resp.json().get("operationId") if resp.text else None)
+        )
+        if not operation_id:
+            location = resp.headers.get("Location", "")
+            operation_id = location.rstrip("/").split("/")[-1] if location else None
+
+        if operation_id:
+            poll_operation(operation_id, fabric_token, f"load table '{table_name}'")
+            print(f"   ✓ Table '{table_name}' loaded as Delta table.")
+        else:
+            print(
+                f"   ⚠️  Load accepted (202) but no operation ID to poll — "
+                "check Fabric portal to confirm table creation."
+            )
+        return True
+
+    return False
+
+
 def load_table_from_file(
     workspace_id: str,
     lakehouse_id: str,
@@ -389,61 +445,59 @@ def load_table_from_file(
     fabric_token: str,
 ) -> None:
     """
-    Triggers the Fabric Load Table API which reads the CSV from OneLake Files/
-    and writes it as a managed Delta table in the Lakehouse Tables/ section.
-    This is an async operation; we poll until it completes.
+    Triggers the Fabric Load Table API to convert an uploaded CSV in OneLake
+    Files/ into a managed Delta table.
+
+    Tries multiple payload variations to handle differences across Fabric
+    API preview versions (different required fields, casing, etc.).
     """
-    print(f"📊 Loading table '{table_name}' from Files/{onelake_filename}...")
+    print(f"   Loading table '{table_name}' from Files/{onelake_filename}...")
 
-    payload = {
-        "relativePath": f"Files/{onelake_filename}",
-        "pathType": "File",
-        "format": "Csv",
-        "formatOptions": {
-            "header": "true",
-            "inferSchema": "true",
+    # Payload variations to try in order (most complete → most minimal)
+    payloads = [
+        # Variation 1: standard documented format
+        {
+            "relativePath": f"Files/{onelake_filename}",
+            "pathType": "File",
+            "format": "Csv",
+            "formatOptions": {"header": "true", "inferSchema": "true"},
+            "mode": "Overwrite",
         },
-        "mode": "Overwrite",
-    }
-
-    resp = requests.post(
-        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/lakehouses/{lakehouse_id}"
-        f"/tables/{table_name}/load",
-        headers={
-            "Authorization": f"Bearer {fabric_token}",
-            "Content-Type": "application/json",
+        # Variation 2: without mode (some preview versions don't accept it)
+        {
+            "relativePath": f"Files/{onelake_filename}",
+            "pathType": "File",
+            "format": "Csv",
+            "formatOptions": {"header": "true", "inferSchema": "true"},
         },
-        json=payload,
-        timeout=60,
-    )
+        # Variation 3: just the filename, no Files/ prefix
+        {
+            "relativePath": onelake_filename,
+            "pathType": "File",
+            "format": "Csv",
+            "formatOptions": {"header": "true", "inferSchema": "true"},
+            "mode": "Overwrite",
+        },
+        # Variation 4: minimal - only required fields
+        {
+            "relativePath": f"Files/{onelake_filename}",
+            "pathType": "File",
+            "format": "Csv",
+        },
+    ]
 
-    if resp.status_code == 200:
-        print(f"✓ Table '{table_name}' loaded (synchronous).")
-        return
-
-    if resp.status_code == 202:
-        # Async – get operation id from header or body
-        operation_id = resp.headers.get("x-ms-operation-id") or resp.json().get(
-            "operationId"
+    last_error = ""
+    for i, payload in enumerate(payloads, 1):
+        print(f"   Attempt {i}: {list(payload.keys())}")
+        resp = _do_load_table_request(
+            workspace_id, lakehouse_id, table_name, payload, fabric_token
         )
-        if not operation_id:
-            # Some versions return Location header
-            location = resp.headers.get("Location", "")
-            operation_id = location.rstrip("/").split("/")[-1] if location else None
+        if _handle_load_response(resp, table_name, fabric_token):
+            return
+        last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
+        print(f"   Attempt {i} failed ({resp.status_code}) — trying next variation...")
 
-        if operation_id:
-            poll_operation(operation_id, fabric_token, f"load table '{table_name}'")
-            print(f"✓ Table '{table_name}' loaded successfully as Delta table.")
-        else:
-            print(
-                "⚠️  Load table accepted (202) but no operation ID found to poll. "
-                "Check Fabric portal to confirm table creation."
-            )
-        return
-
-    raise RuntimeError(
-        f"Load table API failed [{resp.status_code}]: {resp.text[:300]}"
-    )
+    raise RuntimeError(f"Load table API failed after all attempts. Last error: {last_error}")
 
 
 # ─── Fabric Data Agent ────────────────────────────────────────────────────────
