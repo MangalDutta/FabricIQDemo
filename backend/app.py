@@ -43,6 +43,17 @@ async def root() -> Dict[str, str]:
 async def health() -> Dict[str, str]:
     return {"status": "healthy"}
 
+@app.get("/api/config")
+async def config() -> Dict[str, str]:
+    """
+    Returns runtime configuration for the frontend.
+    Exposes POWERBI_REPORT_URL as a backend App Service setting so the Power BI
+    embed URL can be updated without rebuilding the frontend Docker image.
+    """
+    return {
+        "powerbi_report_url": os.environ.get("POWERBI_REPORT_URL", ""),
+    }
+
 @app.post("/api/chat")
 async def chat(request: Request) -> Dict[str, Any]:
     if not fabric_client:

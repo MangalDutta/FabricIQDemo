@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -9,12 +9,30 @@ interface Message {
 }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
-const POWERBI_REPORT_URL = import.meta.env.VITE_POWERBI_REPORT_URL || '';
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  // Power BI URL: fetched from the backend at runtime so it can be updated
+  // via an App Service setting without rebuilding the Docker image.
+  // Falls back to the build-time env var for local development.
+  const [powerbiReportUrl, setPowerbiReportUrl] = useState<string>(
+    import.meta.env.VITE_POWERBI_REPORT_URL || ''
+  );
+
+  useEffect(() => {
+    if (!BACKEND_URL) return;
+    axios
+      .get(`${BACKEND_URL}/api/config`)
+      .then((resp) => {
+        const url: string = resp.data?.powerbi_report_url || '';
+        if (url) setPowerbiReportUrl(url);
+      })
+      .catch(() => {
+        // Config fetch failed — keep the build-time VITE_ value as fallback
+      });
+  }, []);
 
   const sampleQuestions = [
     'Top 5 customers by LifetimeValue in Maharashtra',
@@ -154,9 +172,9 @@ const App: React.FC = () => {
         <div className="powerbi-header">
           <h2>📊 Customer 360 Dashboard</h2>
         </div>
-        {POWERBI_REPORT_URL ? (
+        {powerbiReportUrl ? (
           <iframe
-            src={POWERBI_REPORT_URL}
+            src={powerbiReportUrl}
             title="Customer 360 Power BI Report"
             className="powerbi-iframe"
           />
