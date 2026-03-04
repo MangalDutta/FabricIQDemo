@@ -38,6 +38,10 @@ ONELAKE_DFS_URL = "https://onelake.dfs.fabric.microsoft.com"
 POLL_INTERVAL_SECONDS = 5
 POLL_MAX_ATTEMPTS = 60   # 5 min max
 
+# ─── Retry config for ItemDisplayNameNotAvailableYet (400 + isRetriable) ─────
+NAME_RETRY_MAX = 10        # up to 10 attempts (~5 min)
+NAME_RETRY_WAIT = 30       # seconds between retries
+
 
 def get_fabric_token() -> str:
     credential = DefaultAzureCredential()
@@ -48,6 +52,20 @@ def get_storage_token() -> str:
     """Token for OneLake ADLS Gen2 file uploads (storage.azure.com scope)."""
     credential = DefaultAzureCredential()
     return credential.get_token(STORAGE_SCOPE).token
+
+
+def _is_name_not_available_yet(resp: requests.Response) -> bool:
+    """Return True when Fabric signals the display name is temporarily unavailable."""
+    if resp.status_code != 400:
+        return False
+    try:
+        body = resp.json()
+        return (
+            body.get("errorCode") == "ItemDisplayNameNotAvailableYet"
+            and body.get("isRetriable") is True
+        )
+    except Exception:
+        return False
 
 
 # ─── Generic Fabric REST helper ──────────────────────────────────────────────
@@ -548,15 +566,24 @@ def get_or_create_dataagent(
                     ]
                 },
             }
-            create_resp = requests.post(
-                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=create_payload,
-                timeout=60,
-            )
+            create_resp = None
+            for _attempt in range(1, NAME_RETRY_MAX + 1):
+                create_resp = requests.post(
+                    f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=create_payload,
+                    timeout=60,
+                )
+                if not _is_name_not_available_yet(create_resp):
+                    break
+                print(
+                    f"   ↻ [{_attempt}/{NAME_RETRY_MAX}] Name '{dataagent_name}' not yet "
+                    f"available — retrying in {NAME_RETRY_WAIT}s..."
+                )
+                time.sleep(NAME_RETRY_WAIT)
             if create_resp.status_code in (200, 201):
                 agent_id = create_resp.json().get("id")
                 if agent_id:
@@ -593,17 +620,33 @@ def get_or_create_dataagent(
             print(f"✓ Found existing Data Agent item: {dataagent_name} (ID: {agent_id})")
             return agent_id
 
-    # Create generic item
-    item_resp = fabric_request(
-        "POST",
-        f"/workspaces/{workspace_id}/items",
-        token,
-        json={
-            "displayName": dataagent_name,
-            "type": "DataAgent",
-            "description": "Customer360 conversational analytics agent",
-        },
-    )
+    # Create generic item (retry on ItemDisplayNameNotAvailableYet)
+    item_resp = None
+    for _attempt in range(1, NAME_RETRY_MAX + 1):
+        item_resp = requests.post(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={
+                "displayName": dataagent_name,
+                "type": "DataAgent",
+                "description": "Customer360 conversational analytics agent",
+            },
+            timeout=60,
+        )
+        if not _is_name_not_available_yet(item_resp):
+            break
+        print(
+            f"   ↻ [{_attempt}/{NAME_RETRY_MAX}] Name '{dataagent_name}' not yet "
+            f"available — retrying in {NAME_RETRY_WAIT}s..."
+        )
+        time.sleep(NAME_RETRY_WAIT)
+    if not item_resp.ok:
+        print(f"❌ Fabric API error: POST /workspaces/{workspace_id}/items")
+        print(f"   Status : {item_resp.status_code}")
+        print(f"   Response: {item_resp.text[:500]}")
+        raise RuntimeError(
+            f"Fabric API failed [{item_resp.status_code}]: {item_resp.text[:200]}"
+        )
     if item_resp.status_code == 202:
         op_id = item_resp.headers.get("x-ms-operation-id")
         if op_id:
