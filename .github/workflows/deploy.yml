@@ -3,6 +3,7 @@ name: Quick Deploy Customer360
 on:
   workflow_dispatch:
     inputs:
+      # ── Azure identity ─────────────────────────────────────────────────────
       azure_subscription_id:
         description: 'Azure Subscription ID'
         required: true
@@ -12,21 +13,25 @@ on:
       azure_client_id:
         description: 'OIDC Entra App Client ID'
         required: true
+
+      # ── Azure infra ────────────────────────────────────────────────────────
       resource_group:
-        description: 'Target resource group'
+        description: 'Target resource group (created if absent)'
         required: true
       location:
-        description: 'Azure region (e.g., centralindia, eastus)'
+        description: 'Azure region (e.g. centralindia, eastus)'
         required: true
         default: 'centralindia'
       base_name:
-        description: 'Base name for resources (e.g., cust360)'
+        description: 'Base name for resources (e.g. cust360)'
         required: true
         default: 'cust360'
       env:
-        description: 'Environment (dev/test/prod)'
+        description: 'Environment (dev / test / prod)'
         required: true
         default: 'dev'
+
+      # ── Fabric workspace ───────────────────────────────────────────────────
       workspace_name:
         description: 'Fabric workspace display name'
         required: true
@@ -35,7 +40,7 @@ on:
         required: true
         default: 'Customer360Lakehouse'
       table_name:
-        description: 'Table name for CSV data'
+        description: 'Delta table name for CSV data'
         required: true
         default: 'Customer360'
       dataagent_name:
@@ -43,7 +48,17 @@ on:
         required: true
         default: 'Customer360Agent'
       fabric_capacity_id:
-        description: 'Fabric capacityId (GUID from Fabric Admin → Capacity settings). Optional.'
+        description: 'Fabric capacityId GUID (from Fabric Admin → Capacity settings)'
+        required: false
+        default: ''
+      skip_data_upload:
+        description: 'Skip CSV upload/table load (set true if table already loaded)'
+        required: false
+        default: 'false'
+
+      # ── Front-end ──────────────────────────────────────────────────────────
+      powerbi_report_url:
+        description: 'Power BI embedded report URL (optional)'
         required: false
         default: ''
 
@@ -65,101 +80,83 @@ jobs:
           tenant-id: ${{ inputs.azure_tenant_id }}
           subscription-id: ${{ inputs.azure_subscription_id }}
 
-      - name: Create Resource Group and Deploy Infrastructure
+      - name: Create Resource Group and Deploy Bicep Infrastructure
+        id: infra
         uses: azure/cli@v2
         with:
           inlineScript: |
-            echo "🏗️  Creating resource group: ${{ inputs.resource_group }}"
+            set -e
+            echo "Creating resource group: ${{ inputs.resource_group }}"
             az group create \
               --name "${{ inputs.resource_group }}" \
               --location "${{ inputs.location }}" \
               --output table
 
-            echo "✅ Resource group ready"
-
-            echo "🚀 Deploying Bicep infrastructure..."
+            echo "Deploying Bicep infrastructure..."
             az deployment group create \
               --resource-group "${{ inputs.resource_group }}" \
               --template-file infra/main.bicep \
               --parameters \
-                baseName=${{ inputs.base_name }} \
-                env=${{ inputs.env }} \
-                location=${{ inputs.location }} \
+                baseName="${{ inputs.base_name }}" \
+                env="${{ inputs.env }}" \
+                location="${{ inputs.location }}" \
               --output table
+            echo "Infrastructure deployment complete"
 
-            echo "✅ Infrastructure deployment complete"
-
-      - name: Get deployment outputs
+      - name: Collect deployment outputs
         id: outputs
         uses: azure/cli@v2
         with:
           inlineScript: |
-            ACR_NAME=$(az acr list -g "${{ inputs.resource_group }}" --query "[0].name" -o tsv)
-            BE_APP=$(az webapp list -g "${{ inputs.resource_group }}" --query "[?contains(name, 'backend')].name | [0]" -o tsv)
-            FE_APP=$(az webapp list -g "${{ inputs.resource_group }}" --query "[?contains(name, 'frontend')].name | [0]" -o tsv)
-            KV_NAME=$(az keyvault list -g "${{ inputs.resource_group }}" --query "[0].name" -o tsv)
+            set -e
+            RG="${{ inputs.resource_group }}"
+            ACR_NAME=$(az acr list -g "$RG" --query "[0].name" -o tsv)
+            BE_APP=$(az webapp list -g "$RG" --query "[?contains(name,'backend')].name | [0]" -o tsv)
+            FE_APP=$(az webapp list -g "$RG" --query "[?contains(name,'frontend')].name | [0]" -o tsv)
+            KV_NAME=$(az keyvault list -g "$RG" --query "[0].name" -o tsv)
+            # Use 'list' (not 'show') to enumerate App Insights components in the RG
+            APPI_CS=$(az monitor app-insights component list -g "$RG" \
+              --query "[0].connectionString" -o tsv 2>/dev/null || true)
 
-            echo "acr_name=$ACR_NAME" >> $GITHUB_OUTPUT
-            echo "backend_app=$BE_APP" >> $GITHUB_OUTPUT
-            echo "frontend_app=$FE_APP" >> $GITHUB_OUTPUT
-            echo "kv_name=$KV_NAME" >> $GITHUB_OUTPUT
+            echo "acr_name=$ACR_NAME"       >> $GITHUB_OUTPUT
+            echo "backend_app=$BE_APP"       >> $GITHUB_OUTPUT
+            echo "frontend_app=$FE_APP"      >> $GITHUB_OUTPUT
+            echo "kv_name=$KV_NAME"         >> $GITHUB_OUTPUT
+            echo "app_insights_cs=$APPI_CS" >> $GITHUB_OUTPUT
 
-            echo "✓ ACR: $ACR_NAME"
-            echo "✓ Backend: $BE_APP"
-            echo "✓ Frontend: $FE_APP"
-            echo "✓ Key Vault: $KV_NAME"
+            echo "ACR: $ACR_NAME  Backend: $BE_APP  Frontend: $FE_APP  KV: $KV_NAME"
 
       - name: Build and push backend Docker image
         uses: azure/cli@v2
         with:
           inlineScript: |
-            echo "🐳 Building backend image..."
+            set -e
+            echo "Building backend image..."
             az acr build \
-              --registry ${{ steps.outputs.outputs.acr_name }} \
+              --registry "${{ steps.outputs.outputs.acr_name }}" \
               --image fabric-customer360-backend:latest \
               --file backend/Dockerfile \
               backend
-            echo "✅ Backend image built and pushed"
+            echo "Backend image pushed"
 
       - name: Build and push frontend Docker image
         uses: azure/cli@v2
         with:
           inlineScript: |
-            echo "🐳 Building frontend image..."
+            set -e
+            BE_URL="https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
+            echo "Building frontend image (VITE_BACKEND_URL=$BE_URL)..."
             az acr build \
-              --registry ${{ steps.outputs.outputs.acr_name }} \
+              --registry "${{ steps.outputs.outputs.acr_name }}" \
               --image fabric-customer360-frontend:latest \
               --file frontend/Dockerfile \
+              --build-arg VITE_BACKEND_URL="$BE_URL" \
+              --build-arg VITE_POWERBI_REPORT_URL="${{ inputs.powerbi_report_url }}" \
               frontend
-            echo "✅ Frontend image built and pushed"
+            echo "Frontend image pushed"
 
-      - name: Configure backend App Service
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            echo "⚙️  Configuring backend App Service..."
-            az webapp config container set \
-              --resource-group "${{ inputs.resource_group }}" \
-              --name "${{ steps.outputs.outputs.backend_app }}" \
-              --docker-custom-image-name "${{ steps.outputs.outputs.acr_name }}.azurecr.io/fabric-customer360-backend:latest" \
-              --docker-registry-server-url "https://${{ steps.outputs.outputs.acr_name }}.azurecr.io"
-
-            az webapp restart --resource-group "${{ inputs.resource_group }}" --name "${{ steps.outputs.outputs.backend_app }}"
-            echo "✅ Backend configured"
-
-      - name: Configure frontend App Service
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            echo "⚙️  Configuring frontend App Service..."
-            az webapp config container set \
-              --resource-group "${{ inputs.resource_group }}" \
-              --name "${{ steps.outputs.outputs.frontend_app }}" \
-              --docker-custom-image-name "${{ steps.outputs.outputs.acr_name }}.azurecr.io/fabric-customer360-frontend:latest" \
-              --docker-registry-server-url "https://${{ steps.outputs.outputs.acr_name }}.azurecr.io"
-
-            az webapp restart --resource-group "${{ inputs.resource_group }}" --name "${{ steps.outputs.outputs.frontend_app }}"
-            echo "✅ Frontend configured"
+      # ── Run Fabric setup BEFORE backend configuration so the workspace_id
+      #    and dataagent_id outputs are available for the app settings step. ──
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -170,39 +167,133 @@ jobs:
         run: pip install azure-identity requests
 
       - name: Run Fabric setup
+        id: fabric_setup
         env:
           AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
         run: |
-          echo "🤖 Running Fabric setup..."
+          set -e
+          echo "Running Fabric setup..."
+
+          SKIP_FLAG=""
+          if [ "${{ inputs.skip_data_upload }}" = "true" ]; then
+            SKIP_FLAG="--skip_data_upload"
+          fi
+
           python scripts/fabric_setup.py \
             --workspace_name "${{ inputs.workspace_name }}" \
             --lakehouse_name "${{ inputs.lakehouse_name }}" \
             --csv_path "sample-data/customer360.csv" \
             --table_name "${{ inputs.table_name }}" \
             --dataagent_name "${{ inputs.dataagent_name }}" \
-            --capacity_id "${{ inputs.fabric_capacity_id }}"
-          echo "✅ Fabric setup complete"
+            --capacity_id "${{ inputs.fabric_capacity_id }}" \
+            $SKIP_FLAG
+
+          echo "Fabric setup complete"
+          echo "workspace_id=${{ env.FABRIC_WORKSPACE_ID }}" >> $GITHUB_OUTPUT
+
+      - name: Configure backend App Service
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -e
+            RG="${{ inputs.resource_group }}"
+            BE="${{ steps.outputs.outputs.backend_app }}"
+            ACR="${{ steps.outputs.outputs.acr_name }}"
+            FE_URL="https://${{ steps.outputs.outputs.frontend_app }}.azurewebsites.net"
+
+            WORKSPACE_ID="${{ steps.fabric_setup.outputs.workspace_id }}"
+            DATAAGENT_ID="${{ steps.fabric_setup.outputs.dataagent_id }}"
+
+            echo "Configuring backend App Service ($BE)..."
+            echo "  Fabric Workspace ID : $WORKSPACE_ID"
+            echo "  Fabric Data Agent ID: $DATAAGENT_ID"
+
+            # Use ACR admin credentials — most reliable approach, no role-propagation
+            # delays that cause ImagePullUnauthorizedFailure with managed identity.
+            ACR_USER=$(az acr credential show --name "$ACR" --query "username" -o tsv)
+            ACR_PASS=$(az acr credential show --name "$ACR" --query "passwords[0].value" -o tsv)
+
+            az webapp config container set \
+              --resource-group "$RG" --name "$BE" \
+              --docker-custom-image-name "${ACR}.azurecr.io/fabric-customer360-backend:latest" \
+              --docker-registry-server-url "https://${ACR}.azurecr.io" \
+              --docker-registry-server-user "$ACR_USER" \
+              --docker-registry-server-password "$ACR_PASS"
+
+            az webapp config appsettings set \
+              --resource-group "$RG" --name "$BE" \
+              --settings \
+                FABRIC_WORKSPACE_ID="$WORKSPACE_ID" \
+                FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
+                CORS_ALLOWED_ORIGINS="$FE_URL" \
+                APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.outputs.outputs.app_insights_cs }}" \
+                WEBSITES_ENABLE_APP_SERVICE_STORAGE="false" \
+                DOCKER_REGISTRY_SERVER_URL="https://${ACR}.azurecr.io" \
+                DOCKER_ENABLE_CI="true"
+
+            az webapp restart --resource-group "$RG" --name "$BE"
+            echo "Backend configured and restarted"
+
+      - name: Configure frontend App Service
+        uses: azure/cli@v2
+        with:
+          inlineScript: |
+            set -e
+            RG="${{ inputs.resource_group }}"
+            FE="${{ steps.outputs.outputs.frontend_app }}"
+            ACR="${{ steps.outputs.outputs.acr_name }}"
+
+            echo "Configuring frontend App Service ($FE)..."
+
+            # Use ACR admin credentials — same as backend, avoids managed identity
+            # role-propagation timing issues that cause ImagePullUnauthorizedFailure.
+            ACR_USER=$(az acr credential show --name "$ACR" --query "username" -o tsv)
+            ACR_PASS=$(az acr credential show --name "$ACR" --query "passwords[0].value" -o tsv)
+
+            az webapp config container set \
+              --resource-group "$RG" --name "$FE" \
+              --docker-custom-image-name "${ACR}.azurecr.io/fabric-customer360-frontend:latest" \
+              --docker-registry-server-url "https://${ACR}.azurecr.io" \
+              --docker-registry-server-user "$ACR_USER" \
+              --docker-registry-server-password "$ACR_PASS"
+
+            az webapp config appsettings set \
+              --resource-group "$RG" --name "$FE" \
+              --settings \
+                WEBSITES_ENABLE_APP_SERVICE_STORAGE="false" \
+                DOCKER_REGISTRY_SERVER_URL="https://${ACR}.azurecr.io" \
+                DOCKER_ENABLE_CI="true" \
+                WEBSITES_PORT="8080"
+
+            az webapp restart --resource-group "$RG" --name "$FE"
+            echo "Frontend configured and restarted"
 
       - name: Deployment Summary
         run: |
-          echo "================================================"
-          echo "✅ Customer360 Deployment Complete!"
-          echo "================================================"
+          echo "========================================================"
+          echo "Customer360 Deployment Complete!"
+          echo "========================================================"
           echo ""
-          echo "🌐 Application URLs:"
-          echo "  Frontend: https://${{ steps.outputs.outputs.frontend_app }}.azurewebsites.net"
-          echo "  Backend:  https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
+          echo "Application URLs:"
+          echo "  Frontend : https://${{ steps.outputs.outputs.frontend_app }}.azurewebsites.net"
+          echo "  Backend  : https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
+          echo "  Health   : https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net/health"
           echo ""
-          echo "🔐 Azure Resources:"
-          echo "  Resource Group: ${{ inputs.resource_group }}"
-          echo "  ACR: ${{ steps.outputs.outputs.acr_name }}"
-          echo "  Key Vault: ${{ steps.outputs.outputs.kv_name }}"
+          echo "Azure Resources:"
+          echo "  Resource Group : ${{ inputs.resource_group }}"
+          echo "  ACR            : ${{ steps.outputs.outputs.acr_name }}"
+          echo "  Key Vault      : ${{ steps.outputs.outputs.kv_name }}"
           echo ""
-          echo "🤖 Fabric Resources:"
-          echo "  Workspace: ${{ inputs.workspace_name }}"
-          echo "  Lakehouse: ${{ inputs.lakehouse_name }}"
-          echo "  Table: ${{ inputs.table_name }}"
-          echo "  Data Agent: ${{ inputs.dataagent_name }}"
-          echo "  CapacityId: ${{ inputs.fabric_capacity_id }}"
+          echo "Fabric Resources:"
+          echo "  Workspace   : ${{ inputs.workspace_name }}"
+          echo "  Workspace ID: ${{ steps.fabric_setup.outputs.workspace_id }}"
+          echo "  Lakehouse   : ${{ inputs.lakehouse_name }}"
+          echo "  Table       : ${{ inputs.table_name }}"
+          echo "  Data Agent  : ${{ inputs.dataagent_name }}"
+          echo "  Agent ID    : ${{ steps.fabric_setup.outputs.dataagent_id }}"
+          echo "  CapacityId  : ${{ inputs.fabric_capacity_id }}"
           echo ""
-          echo "================================================"
+          echo "Chat backend uses: Fabric Data Agent (direct)"
+          echo "  FABRIC_WORKSPACE_ID  = ${{ steps.fabric_setup.outputs.workspace_id }}"
+          echo "  FABRIC_DATAAGENT_ID  = ${{ steps.fabric_setup.outputs.dataagent_id }}"
+          echo "========================================================"

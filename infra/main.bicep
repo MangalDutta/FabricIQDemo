@@ -65,6 +65,7 @@ module appServices 'modules/appservice.bicep' = {
     logAnalyticsId: monitoring.outputs.logAnalyticsId
     acrName: acr.outputs.acrName
     keyVaultName: keyVault.outputs.keyVaultName
+    appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
 

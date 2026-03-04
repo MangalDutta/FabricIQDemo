@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any, Dict
 
-from foundry_client import FoundryClient
+from fabric_client import FabricClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("customer360-backend")
@@ -25,11 +25,11 @@ app.add_middleware(
 )
 
 try:
-    foundry_client = FoundryClient()
-    logger.info("✓ Foundry client initialized")
+    fabric_client = FabricClient()
+    logger.info("✓ Fabric Data Agent client initialized")
 except Exception as ex:
-    logger.error(f"Failed to initialize Foundry client: {ex}")
-    foundry_client = None
+    logger.error(f"Failed to initialize Fabric client: {ex}")
+    fabric_client = None
 
 @app.get("/")
 async def root() -> Dict[str, str]:
@@ -45,8 +45,8 @@ async def health() -> Dict[str, str]:
 
 @app.post("/api/chat")
 async def chat(request: Request) -> Dict[str, Any]:
-    if not foundry_client:
-        raise HTTPException(status_code=503, detail="Foundry client not configured")
+    if not fabric_client:
+        raise HTTPException(status_code=503, detail="Fabric client not configured")
 
     try:
         body = await request.json()
@@ -57,7 +57,7 @@ async def chat(request: Request) -> Dict[str, Any]:
             raise HTTPException(status_code=400, detail="'message' field is required")
 
         logger.info(f"Chat request from {user_id}: {message[:100]}")
-        result = foundry_client.chat(user_id=user_id, message=message)
+        result = fabric_client.chat(user_id=user_id, message=message)
         logger.info(f"Chat response received for {user_id}")
 
         return {

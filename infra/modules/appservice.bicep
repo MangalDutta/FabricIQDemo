@@ -16,6 +16,9 @@ param acrName string
 @description('Key Vault name')
 param keyVaultName string
 
+@description('Application Insights connection string for backend telemetry')
+param appInsightsConnectionString string = ''
+
 var backendAppName = 'app-${baseName}-backend-${env}'
 var frontendAppName = 'app-${baseName}-frontend-${env}'
 var appServicePlanName = 'plan-${baseName}-${env}'
@@ -44,6 +47,8 @@ resource backendApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     siteConfig: {
       linuxFxVersion: 'DOCKER|nginx:alpine'
+      // Use managed identity to pull from ACR (no admin credentials needed)
+      acrUseManagedIdentityCreds: true
       appSettings: [
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
@@ -61,6 +66,11 @@ resource backendApp 'Microsoft.Web/sites@2023-12-01' = {
           name: 'KEYVAULT_URL'
           value: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/'
         }
+        {
+          // Populated by GitHub Actions post-deploy step
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: appInsightsConnectionString
+        }
       ]
     }
     httpsOnly: true
@@ -77,6 +87,8 @@ resource frontendApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     siteConfig: {
       linuxFxVersion: 'DOCKER|nginx:alpine'
+      // Use managed identity to pull from ACR (no admin credentials needed)
+      acrUseManagedIdentityCreds: true
       appSettings: [
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
