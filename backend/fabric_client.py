@@ -190,6 +190,17 @@ class FabricClient:
                 resp.status_code,
                 error_detail,
             )
+            if resp.status_code == 404:
+                raise RuntimeError(
+                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound) after "
+                    f"{_AGENT_NOT_READY_RETRIES} retries. "
+                    f"The stored agent ID '{self.dataagent_id}' is stale or invalid. "
+                    f"Re-run the deploy workflow to recreate the agent and refresh "
+                    f"the FABRIC_DATAAGENT_ID App Service setting, or go to "
+                    f"https://app.fabric.microsoft.com, open the workspace, find "
+                    f"'Customer360Agent', copy its ID from the URL, and update "
+                    f"FABRIC_DATAAGENT_ID in the backend App Service configuration."
+                )
             raise RuntimeError(
                 f"Fabric Data Agent returned HTTP {resp.status_code}: {error_detail}"
             )

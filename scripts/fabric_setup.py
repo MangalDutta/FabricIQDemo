@@ -518,6 +518,50 @@ def load_table_from_file(
     raise RuntimeError(f"Load table API failed after all attempts. Last error: {last_error}")
 
 
+# ─── Fabric Data Agent helpers ────────────────────────────────────────────────
+
+def _validate_agent(workspace_id: str, agent_id: str, token: str) -> bool:
+    """
+    Returns True if GET /dataAgents/{agent_id} succeeds (agent is queryable).
+    A listed agent can be in a broken/incomplete state (e.g. created via the
+    generic Items API without proper initialisation); validating before using
+    the ID prevents stale IDs propagating into the App Service setting.
+    """
+    try:
+        resp = requests.get(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        return resp.ok
+    except Exception:
+        return False
+
+
+def _delete_agent(workspace_id: str, agent_id: str, token: str) -> None:
+    """
+    Attempts to delete a broken Data Agent so it can be recreated cleanly.
+    Tries the dedicated /dataAgents endpoint first, then the generic /items
+    endpoint.  Logs but does not raise on failure.
+    """
+    for path in (
+        f"/workspaces/{workspace_id}/dataAgents/{agent_id}",
+        f"/workspaces/{workspace_id}/items/{agent_id}",
+    ):
+        try:
+            resp = requests.delete(
+                f"{FABRIC_BASE_URL}{path}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            )
+            if resp.ok or resp.status_code == 404:
+                print(f"   🗑️  Deleted broken agent (ID: {agent_id}) via {path}")
+                return
+        except Exception as exc:
+            print(f"   ⚠️  Delete attempt via {path} failed (non-fatal): {exc}")
+    print(f"   ⚠️  Could not delete agent {agent_id} — re-creation may fail with name conflict")
+
+
 # ─── Fabric Data Agent ────────────────────────────────────────────────────────
 
 def get_or_create_dataagent(
@@ -549,8 +593,16 @@ def get_or_create_dataagent(
             for agent in list_resp.json().get("value", []) or []:
                 if agent.get("displayName") == dataagent_name:
                     agent_id = agent["id"]
-                    print(f"✓ Found existing Data Agent: {dataagent_name} (ID: {agent_id})")
-                    return agent_id
+                    if _validate_agent(workspace_id, agent_id, token):
+                        print(f"✓ Found existing Data Agent: {dataagent_name} (ID: {agent_id})")
+                        return agent_id
+                    # Agent is listed but not queryable — delete and recreate
+                    print(
+                        f"⚠️  Agent '{dataagent_name}' (ID: {agent_id}) exists but is not "
+                        f"queryable — deleting and recreating..."
+                    )
+                    _delete_agent(workspace_id, agent_id, token)
+                    break  # Exit search loop; fall through to creation below
 
             print(f"📦 Creating Data Agent: {dataagent_name}")
             create_payload = {
@@ -617,8 +669,17 @@ def get_or_create_dataagent(
     for item in items_resp.json().get("value", []) or []:
         if item.get("displayName") == dataagent_name:
             agent_id = item["id"]
-            print(f"✓ Found existing Data Agent item: {dataagent_name} (ID: {agent_id})")
-            return agent_id
+            if _validate_agent(workspace_id, agent_id, token):
+                print(f"✓ Found existing Data Agent item: {dataagent_name} (ID: {agent_id})")
+                return agent_id
+            # Item exists but isn't queryable via the dedicated endpoint —
+            # delete it so we can create a fresh, properly initialised agent.
+            print(
+                f"⚠️  Agent item '{dataagent_name}' (ID: {agent_id}) is not queryable — "
+                f"deleting and recreating..."
+            )
+            _delete_agent(workspace_id, agent_id, token)
+            break  # Exit search loop; fall through to creation below
 
     # Create generic item (retry on ItemDisplayNameNotAvailableYet)
     item_resp = None
