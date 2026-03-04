@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -744,27 +745,74 @@ def get_default_semantic_model(
     workspace_id: str,
     lakehouse_name: str,
     token: str,
-    retries: int = 6,
+    retries: int = 24,
 ) -> Optional[str]:
     """
     Finds the default Power BI Semantic Model that Fabric auto-creates when
     a Lakehouse is provisioned.  Its display name matches the Lakehouse name.
 
-    Retries up to `retries` times (30-second intervals) because Fabric may
-    take a minute to materialise the default semantic model after table load.
+    Retries up to `retries` times (30-second intervals, ~12 min total) because
+    Fabric can take several minutes to materialise the default semantic model
+    after a table load — especially on first deploy.
+
+    Searches both 'SemanticModel' and 'Dataset' item types (the type name
+    varies across Fabric API preview versions).  Falls back to listing all
+    workspace items if neither typed search finds it.
 
     Returns the semantic model item ID, or None if not found.
     """
     print(f"📐 Looking for default semantic model: {lakehouse_name}")
+
     for attempt in range(1, retries + 1):
-        resp = fabric_request(
-            "GET", f"/workspaces/{workspace_id}/items?type=SemanticModel", token
-        )
-        for item in resp.json().get("value", []) or []:
-            if item.get("displayName") == lakehouse_name:
-                sm_id = item["id"]
-                print(f"✓ Found default semantic model: {lakehouse_name} (ID: {sm_id})")
-                return sm_id
+        # 1. Try SemanticModel type (current Fabric API name)
+        for item_type in ("SemanticModel", "Dataset"):
+            try:
+                resp = fabric_request(
+                    "GET",
+                    f"/workspaces/{workspace_id}/items?type={item_type}",
+                    token,
+                )
+                for item in resp.json().get("value", []) or []:
+                    if item.get("displayName") == lakehouse_name:
+                        sm_id = item["id"]
+                        print(
+                            f"✓ Found default semantic model: {lakehouse_name} "
+                            f"(ID: {sm_id}, type: {item_type})"
+                        )
+                        return sm_id
+            except Exception as exc:
+                print(f"   ⚠️  type={item_type} lookup failed (non-fatal): {exc}")
+
+        # 2. Every 4th attempt: list ALL items and dump names for diagnosis
+        if attempt % 4 == 0:
+            try:
+                all_resp = fabric_request(
+                    "GET", f"/workspaces/{workspace_id}/items", token
+                )
+                all_items = all_resp.json().get("value", []) or []
+                print(
+                    f"   Workspace items visible so far: "
+                    + ", ".join(
+                        f"{i.get('displayName')} ({i.get('type')})"
+                        for i in all_items
+                    ) or "(none)"
+                )
+                # Also try a partial-name / type-agnostic match
+                for item in all_items:
+                    name = item.get("displayName", "")
+                    itype = item.get("type", "")
+                    if name == lakehouse_name and itype not in (
+                        "Lakehouse", "SQLEndpoint", "MirroredDatabase"
+                    ):
+                        sm_id = item["id"]
+                        print(
+                            f"✓ Found semantic model via all-items search: "
+                            f"{name} (ID: {sm_id}, type: {itype})"
+                        )
+                        return sm_id
+            except Exception as exc:
+                print(f"   ⚠️  All-items fallback failed (non-fatal): {exc}")
+
         if attempt < retries:
             print(
                 f"   ↻ [{attempt}/{retries}] Semantic model not ready yet — "
@@ -773,13 +821,87 @@ def get_default_semantic_model(
             time.sleep(30)
 
     print(
-        f"   ⚠️  Default semantic model '{lakehouse_name}' not found after retries.\n"
+        f"   ⚠️  Default semantic model '{lakehouse_name}' not found after "
+        f"{retries} attempts ({retries * 30 // 60} min).\n"
         "   You can create a Power BI report manually in the Fabric portal later."
     )
     return None
 
 
 # ─── Power BI Report ──────────────────────────────────────────────────────────
+
+def _build_report_definition(semantic_model_id: str) -> Dict[str, Any]:
+    """
+    Build a minimal PBIR-Legacy report definition (base64-encoded parts) that
+    creates a blank report with a live connection to the given semantic model.
+
+    The Fabric Reports API (POST /v1/workspaces/{id}/reports) requires a full
+    'definition' object — passing only 'semanticModelId' is not supported.
+
+    Parts produced:
+      definition.pbir  — XMLA-style live connection to the semantic model
+      report.json      — Minimal single-page blank report layout
+    """
+    pbir = {
+        "version": "1.0",
+        "datasetReference": {
+            "byConnection": {
+                "connectionString": None,
+                "pbiServiceModelId": None,
+                "pbiModelVirtualServerName": "sobe_wowvirtualserver",
+                "pbiModelDatabaseName": semantic_model_id,
+                "name": "EntityDataSource",
+                "connectionType": "pbiServiceXmlaStyleLive",
+            }
+        },
+    }
+    report_json = {
+        "id": "00000000-0000-0000-0000-000000000000",
+        "config": json.dumps({
+            "version": "5.54",
+            "themeCollection": {
+                "baseTheme": {"name": "CY24SU06", "version": "5.54", "type": 2}
+            },
+        }),
+        "layoutOptimization": 0,
+        "publicCustomVisuals": [],
+        "pods": [],
+        "resourcePackages": [],
+        "sections": [
+            {
+                "id": "ReportSection",
+                "name": "ReportSection",
+                "displayName": "Page 1",
+                "filters": "[]",
+                "ordinal": 0,
+                "visualContainers": [],
+                "config": json.dumps({"relationships": []}),
+                "height": 720,
+                "width": 1280,
+                "type": 20,
+            }
+        ],
+    }
+
+    def _b64(obj: Any) -> str:
+        return base64.b64encode(json.dumps(obj).encode()).decode()
+
+    return {
+        "format": "PBIR-Legacy",
+        "parts": [
+            {
+                "path": "definition.pbir",
+                "payload": _b64(pbir),
+                "payloadType": "InlineBase64",
+            },
+            {
+                "path": "report.json",
+                "payload": _b64(report_json),
+                "payloadType": "InlineBase64",
+            },
+        ],
+    }
+
 
 def get_or_create_report(
     workspace_id: str,
@@ -803,9 +925,10 @@ def get_or_create_report(
             print(f"✓ Found existing report: {report_name} (ID: {report_id})")
             return report_id
 
-    # ── Create via Fabric items API ───────────────────────────────────────
+    # ── Create via Fabric Reports API with PBIR-Legacy definition ─────────
     print(f"📦 Creating Power BI report: {report_name}")
     try:
+        definition = _build_report_definition(semantic_model_id)
         create_resp = requests.post(
             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/reports",
             headers={
@@ -814,7 +937,7 @@ def get_or_create_report(
             },
             json={
                 "displayName": report_name,
-                "semanticModelId": semantic_model_id,
+                "definition": definition,
             },
             timeout=60,
         )
@@ -826,7 +949,10 @@ def get_or_create_report(
                 return report_id
 
         elif create_resp.status_code == 202:
-            op_id = create_resp.headers.get("x-ms-operation-id")
+            op_id = (
+                create_resp.headers.get("x-ms-operation-id")
+                or create_resp.headers.get("x-ms-operationid")
+            )
             if op_id:
                 poll_operation(op_id, token, "report creation")
             # Re-fetch after async creation
@@ -841,12 +967,33 @@ def get_or_create_report(
         else:
             print(
                 f"   ⚠️  Report creation returned HTTP {create_resp.status_code}: "
-                f"{create_resp.text[:200]}\n"
-                "   Create the report manually in the Fabric portal."
+                f"{create_resp.text[:300]}"
+            )
+            print("   Trying generic Items API as fallback...")
+            # Fallback: create as a generic item (no definition required)
+            item_resp = requests.post(
+                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={"displayName": report_name, "type": "Report"},
+                timeout=60,
+            )
+            if item_resp.status_code in (200, 201):
+                report_id = item_resp.json().get("id")
+                if report_id:
+                    print(f"✓ Created report via Items API: {report_name} (ID: {report_id})")
+                    return report_id
+            print(
+                f"   ⚠️  Items API fallback also failed ({item_resp.status_code}). "
+                "Create the report manually in the Fabric portal."
             )
     except Exception as exc:
-        print(f"   ⚠️  Report creation failed: {exc}\n"
-              "   Create the report manually in the Fabric portal.")
+        print(
+            f"   ⚠️  Report creation failed: {exc}\n"
+            "   Create the report manually in the Fabric portal."
+        )
     return None
 
 
