@@ -43,14 +43,14 @@ Actions → Quick Deploy Customer360 → Run workflow
 ```
 **Key inputs:**
 ```
-Fabric capacityId: 44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B  # ← YOUR CAPACITY ID
+Fabric capacityId: xxxxxxxxB  # ← YOUR CAPACITY ID
 Workspace name: fabricagentdemo
 ```
 
 ### 2. Test
 ```
-Frontend: https://app-cust360-frontend-dev.azurewebsites.net
-Backend: https://app-cust360-backend-dev.azurewebsites.net/health
+Frontend: https://xxxxxxxxxxx.azurewebsites.net
+Backend: https://xxxxxxxxxxx.azurewebsites.net/health
 Query: "Top 5 customers by LifetimeValue"
 ```
 
@@ -72,7 +72,7 @@ Your OIDC app (`azure_client_id`) needs **these Azure RBAC roles**:
 ### On Fabric Capacity (`44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B`):
 ```
 Azure CLI:
-az role assignment create --assignee <YOUR_APP_ID> --role "Contributor" --scope "/subscriptions/.../microsoft.fabric/capacities/44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B"
+az role assignment create --assignee <YOUR_APP_ID> --role "Contributor" --scope "/subscriptions/.../microsoft.fabric/capacities/xxxxxxxxxx"
 ```
 
 ### Fabric API Scopes (Entra App → API permissions):
@@ -96,7 +96,7 @@ Fabric.Lakehouse.ReadWrite.All
    ↓ Docker builds
 3. Fabric Setup (Python + Fabric REST API):
    ├── Find/create workspace fabricagentdemo
-   ├── Bind to capacityId: 44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B
+   ├── Bind to capacityId: xxxxxxxxxxxxxx
    └── Create lakehouse Customer360Lakehouse
 4. Apps deployed → Query lakehouse via Fabric REST
 ```
@@ -105,8 +105,8 @@ Fabric.Lakehouse.ReadWrite.All
 
 **Expected URLs** (from deployment summary):
 ```
-Frontend: https://app-cust360-frontend-dev.azurewebsites.net
-Backend:  https://app-cust360-backend-dev.azurewebsites.net/health ✅ 200
+Frontend: https://xxxxxxxxxxxx.azurewebsites.net
+Backend:  https://xxxxxxxxxxx.azurewebsites.net/health ✅ 200
 ```
 
 **Sample queries:**
@@ -156,7 +156,7 @@ FIX: Check GitHub → Settings → Secrets → Federated credentials
 - [ ] Workflow completes ✅ (no 403s)
 - [ ] Backend `/health` returns 200 ✅
 - [ ] Frontend loads ✅
-- [ ] Workspace shows capacity `44BF8C5D-61B3-4227-9AA8-98D8E5B75C6B` ✅
+- [ ] Workspace shows capacity `xxxxxxxxxxxx` ✅
 - [ ] Lakehouse `Customer360Lakehouse` exists ✅
 - [ ] Query "Top 5 customers" works ✅
 
