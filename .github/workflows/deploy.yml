@@ -74,7 +74,7 @@ on:
         required: false
         default: ''
       fabric_capacity_id:
-        description: 'Existing Fabric capacityId GUID (Fabric Admin -> Capacity settings). Ignored when fabric_sku is set — the new capacity ID is used automatically.'
+        description: 'Existing Fabric capacityId GUID (Fabric Admin -> Capacity settings). Ignored when fabric_sku is set - the new capacity ID is used automatically.'
         required: false
         default: ''
       skip_data_upload:
@@ -185,9 +185,9 @@ print(match)
 " 2>/dev/null || true)
 
               if [ -n "$FABRIC_CAP_ID" ]; then
-                echo "  ✓ Fabric capacity GUID: $FABRIC_CAP_ID"
+                echo "  [OK] Fabric capacity GUID: $FABRIC_CAP_ID"
               else
-                echo "  ⚠️  Could not resolve Fabric capacity GUID — workspace will not be assigned to the new capacity"
+                echo "  [WARN] Could not resolve Fabric capacity GUID - workspace will not be assigned to the new capacity"
               fi
             fi
 
@@ -234,7 +234,7 @@ print(match)
           # Capacity ID resolution (priority order):
           #   1. Newly provisioned capacity from Bicep (fabric_sku was set)
           #   2. Manually supplied existing capacity GUID (fabric_capacity_id)
-          #   3. Empty — workspace is left on its current capacity
+          #   3. Empty - workspace is left on its current capacity
           CAPACITY_ID="${{ steps.outputs.outputs.fabric_capacity_id }}"
           if [ -z "$CAPACITY_ID" ]; then
             CAPACITY_ID="${{ inputs.fabric_capacity_id }}"
@@ -394,7 +394,7 @@ print(match)
           elif [ -n "${{ inputs.fabric_capacity_id }}" ]; then
             echo "  Capacity ID : ${{ inputs.fabric_capacity_id }} (existing)"
           else
-            echo "  Capacity    : (none specified — using workspace default)"
+            echo "  Capacity    : (none specified - using workspace default)"
           fi
           echo "  Workspace URL: ${{ steps.fabric_setup.outputs.workspace_url }}"
           echo "  Data Agent  : ${{ inputs.dataagent_name }}"
