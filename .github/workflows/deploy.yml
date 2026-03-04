@@ -176,13 +176,7 @@ jobs:
               FABRIC_CAP_ID=$(curl -sf \
                 -H "Authorization: Bearer $FABRIC_TOKEN" \
                 "https://api.fabric.microsoft.com/v1/capacities" \
-                | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-target = '$CAP_DISPLAY_NAME'.lower()
-match = next((c['id'] for c in data.get('value', []) if c.get('displayName', '').lower() == target), '')
-print(match)
-" 2>/dev/null || true)
+                | python3 -c "import sys,json;d=json.load(sys.stdin);t='$CAP_DISPLAY_NAME'.lower();print(next((c['id'] for c in d.get('value',[]) if c.get('displayName','').lower()==t),''))" 2>/dev/null || true)
 
               if [ -n "$FABRIC_CAP_ID" ]; then
                 echo "  [OK] Fabric capacity GUID: $FABRIC_CAP_ID"
