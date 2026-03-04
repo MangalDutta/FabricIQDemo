@@ -371,6 +371,7 @@ jobs:
               --settings \
                 FABRIC_WORKSPACE_ID="$WORKSPACE_ID" \
                 FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
+                FABRIC_DATAAGENT_NAME="${{ inputs.dataagent_name }}" \
                 POWERBI_REPORT_URL="$PBI_URL" \
                 CORS_ALLOWED_ORIGINS="$FE_URL" \
                 APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.outputs.outputs.app_insights_cs }}" \
