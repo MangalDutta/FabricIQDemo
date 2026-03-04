@@ -20,8 +20,8 @@ RUN npm install -g serve
 
 COPY --from=builder /app/dist ./dist
 
-EXPOSE $PORT
+EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://localhost:$PORT/ > /dev/null 2>&1 || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 CMD sh -c "wget -qO- http://localhost:${PORT:-8080}/ > /dev/null 2>&1 || exit 1"
 
-CMD ["sh", "-c", "serve -s dist -l $PORT --no-clipboard"]
+CMD ["sh", "-c", "serve -s dist -l ${PORT:-8080}"]
