@@ -3,7 +3,7 @@ name: Quick Deploy Customer360
 on:
   workflow_dispatch:
     inputs:
-      # ── Azure identity ─────────────────────────────────────────────────────
+      # --- Azure identity ---
       azure_subscription_id:
         description: 'Azure Subscription ID'
         required: true
@@ -14,7 +14,7 @@ on:
         description: 'OIDC Entra App Client ID'
         required: true
 
-      # ── Azure infra ────────────────────────────────────────────────────────
+      # --- Azure infra ---
       resource_group:
         description: 'Target resource group (created if absent)'
         required: true
@@ -26,12 +26,12 @@ on:
         description: 'Base name for resources (e.g. cust360)'
         required: true
         default: 'cust360'
-      env:
+      environment:
         description: 'Environment (dev / test / prod)'
         required: true
         default: 'dev'
 
-      # ── Fabric workspace ───────────────────────────────────────────────────
+      # --- Fabric workspace ---
       workspace_name:
         description: 'Fabric workspace display name'
         required: true
@@ -48,7 +48,7 @@ on:
         required: true
         default: 'Customer360Agent'
       fabric_capacity_id:
-        description: 'Fabric capacityId GUID (from Fabric Admin → Capacity settings)'
+        description: 'Fabric capacityId GUID (from Fabric Admin -> Capacity settings)'
         required: false
         default: ''
       skip_data_upload:
@@ -56,12 +56,9 @@ on:
         required: false
         default: 'false'
 
-      # ── Power BI ───────────────────────────────────────────────────────────
+      # --- Power BI ---
       powerbi_report_url:
-        description: |
-          Power BI embedded report URL.
-          Leave blank on first deploy — the workflow will create the report and output
-          its URL. On re-deploy, paste the URL here to embed it in the frontend.
+        description: 'Power BI embedded report URL. Leave blank on first deploy - workflow will create the report. On re-deploy, paste the URL here.'
         required: false
         default: ''
 
@@ -83,7 +80,7 @@ jobs:
           tenant-id: ${{ inputs.azure_tenant_id }}
           subscription-id: ${{ inputs.azure_subscription_id }}
 
-      # ── Step 1: Infrastructure ────────────────────────────────────────────
+      # --- Step 1: Infrastructure ---
       - name: Create Resource Group and Deploy Bicep Infrastructure
         uses: azure/cli@v2
         with:
@@ -101,12 +98,12 @@ jobs:
               --template-file infra/main.bicep \
               --parameters \
                 baseName="${{ inputs.base_name }}" \
-                env="${{ inputs.env }}" \
+                env="${{ inputs.environment }}" \
                 location="${{ inputs.location }}" \
               --output table
             echo "Infrastructure deployment complete"
 
-      # ── Step 2: Collect infra outputs ────────────────────────────────────
+      # --- Step 2: Collect infra outputs ---
       - name: Collect deployment outputs
         id: outputs
         uses: azure/cli@v2
@@ -128,7 +125,7 @@ jobs:
             echo "app_insights_cs=$APPI_CS" >> $GITHUB_OUTPUT
             echo "ACR: $ACR_NAME  Backend: $BE_APP  Frontend: $FE_APP  KV: $KV_NAME"
 
-      # ── Step 3: Build backend Docker image ───────────────────────────────
+      # --- Step 3: Build backend Docker image ---
       - name: Build and push backend Docker image
         uses: azure/cli@v2
         with:
@@ -142,8 +139,8 @@ jobs:
               backend
             echo "Backend image pushed"
 
-      # ── Step 4: Fabric setup (runs BEFORE frontend build so we can ────────
-      #    bake the Power BI embed URL into the React bundle)               ──
+      # --- Step 4: Fabric setup (runs BEFORE frontend build so we can
+      #     bake the Power BI embed URL into the React bundle) ---
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -158,7 +155,7 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ inputs.azure_subscription_id }}
         run: |
           set -e
-          echo "Running Fabric setup (Workspace → Lakehouse → Data Agent → Semantic Model → Report)..."
+          echo "Running Fabric setup..."
 
           SKIP_FLAG=""
           if [ "${{ inputs.skip_data_upload }}" = "true" ]; then
@@ -177,8 +174,7 @@ jobs:
 
           echo "Fabric setup complete"
 
-      # ── Step 5: Build frontend — AFTER Fabric setup so Power BI URL ──────
-      #    (from fabric_setup or user input) is available as a build arg   ──
+      # --- Step 5: Build frontend AFTER Fabric setup so Power BI URL is available ---
       - name: Build and push frontend Docker image
         uses: azure/cli@v2
         with:
@@ -186,14 +182,13 @@ jobs:
             set -e
             BE_URL="https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
 
-            # Prefer explicitly provided URL; fall back to auto-created one
             PBI_URL="${{ inputs.powerbi_report_url }}"
             if [ -z "$PBI_URL" ]; then
               PBI_URL="${{ steps.fabric_setup.outputs.powerbi_embed_url }}"
             fi
 
             echo "Building frontend image..."
-            echo "  VITE_BACKEND_URL      = $BE_URL"
+            echo "  VITE_BACKEND_URL        = $BE_URL"
             echo "  VITE_POWERBI_REPORT_URL = $PBI_URL"
 
             az acr build \
@@ -205,7 +200,7 @@ jobs:
               frontend
             echo "Frontend image pushed"
 
-      # ── Step 6: Configure backend App Service ────────────────────────────
+      # --- Step 6: Configure backend App Service ---
       - name: Configure backend App Service
         uses: azure/cli@v2
         with:
@@ -247,7 +242,7 @@ jobs:
             az webapp restart --resource-group "$RG" --name "$BE"
             echo "Backend configured and restarted"
 
-      # ── Step 7: Configure frontend App Service ───────────────────────────
+      # --- Step 7: Configure frontend App Service ---
       - name: Configure frontend App Service
         uses: azure/cli@v2
         with:
@@ -280,7 +275,7 @@ jobs:
             az webapp restart --resource-group "$RG" --name "$FE"
             echo "Frontend configured and restarted"
 
-      # ── Deployment Summary ────────────────────────────────────────────────
+      # --- Deployment Summary ---
       - name: Deployment Summary
         run: |
           PBI_URL="${{ inputs.powerbi_report_url }}"
@@ -292,35 +287,30 @@ jobs:
           echo " Customer360 Deployment Complete!"
           echo "========================================================"
           echo ""
-          echo "🌐 Application URLs:"
+          echo "Application URLs:"
           echo "  Frontend : https://${{ steps.outputs.outputs.frontend_app }}.azurewebsites.net"
           echo "  Backend  : https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
           echo "  Health   : https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net/health"
           echo ""
-          echo "🏭 Fabric Resources:"
+          echo "Fabric Resources:"
           echo "  Workspace   : ${{ inputs.workspace_name }}"
           echo "  Workspace ID: ${{ steps.fabric_setup.outputs.workspace_id }}"
           echo "  Workspace URL: ${{ steps.fabric_setup.outputs.workspace_url }}"
-          echo "  Lakehouse   : ${{ inputs.lakehouse_name }}"
-          echo "  Table       : ${{ inputs.table_name }}"
           echo "  Data Agent  : ${{ inputs.dataagent_name }}"
           echo "  Agent ID    : ${{ steps.fabric_setup.outputs.dataagent_id }}"
           echo ""
-          echo "📊 Power BI:"
-          echo "  Semantic Model ID: ${{ steps.fabric_setup.outputs.semantic_model_id }}"
-          echo "  Report ID        : ${{ steps.fabric_setup.outputs.report_id }}"
+          echo "Power BI:"
+          echo "  Semantic Model ID : ${{ steps.fabric_setup.outputs.semantic_model_id }}"
+          echo "  Report ID         : ${{ steps.fabric_setup.outputs.report_id }}"
           if [ -n "$PBI_URL" ]; then
-            echo "  Embed URL        : $PBI_URL"
-            echo "  ✅ Power BI is embedded in the frontend"
+            echo "  Embed URL         : $PBI_URL"
+            echo "  Power BI is embedded in the frontend"
           else
-            echo "  ⚠️  Power BI not yet embedded. Steps to add it:"
-            echo "  1. Open: ${{ steps.fabric_setup.outputs.workspace_url }}"
-            echo "  2. Open '${LAKEHOUSE_NAME:-Customer360Lakehouse}' → New report"
-            echo "  3. Save and use File → Embed → Website or portal"
-            echo "  4. Re-run this workflow with: powerbi_report_url=<url> skip_data_upload=true"
+            echo "  Power BI not yet embedded."
+            echo "  Re-run workflow with powerbi_report_url set to embed it."
           fi
           echo ""
-          echo "🔧 Backend env vars set:"
+          echo "Backend env vars set:"
           echo "  FABRIC_WORKSPACE_ID = ${{ steps.fabric_setup.outputs.workspace_id }}"
           echo "  FABRIC_DATAAGENT_ID = ${{ steps.fabric_setup.outputs.dataagent_id }}"
           echo "========================================================"
