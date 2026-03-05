@@ -1,8 +1,12 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+import base64
+import json
 import logging
 import os
 from typing import Any, Dict
+
+import requests as _requests
 
 from fabric_client import FabricClient
 
@@ -53,6 +57,110 @@ async def config() -> Dict[str, str]:
     return {
         "powerbi_report_url": os.environ.get("POWERBI_REPORT_URL", ""),
     }
+
+@app.get("/api/debug")
+async def debug() -> Dict[str, Any]:
+    """
+    Diagnostic endpoint — shows which Managed Identity the backend is using,
+    current Fabric agent state, and step-by-step fix instructions.
+
+    Browse to /api/debug on the backend App Service URL to see:
+      • managed_identity.object_id  — the OID that must be added to the Fabric workspace
+      • agent_check.agent_state     — Published (queryable) or Draft (will 404)
+    """
+    result: Dict[str, Any] = {
+        "env": {
+            "FABRIC_WORKSPACE_ID": os.environ.get("FABRIC_WORKSPACE_ID", "(not set)"),
+            "FABRIC_DATAAGENT_ID": os.environ.get("FABRIC_DATAAGENT_ID", "(not set)"),
+            "FABRIC_DATAAGENT_NAME": os.environ.get("FABRIC_DATAAGENT_NAME", "(not set)"),
+        },
+        "managed_identity": {},
+        "agent_check": {},
+        "instructions": {},
+    }
+
+    if not fabric_client:
+        result["error"] = "Fabric client not initialized — check FABRIC_WORKSPACE_ID / FABRIC_DATAAGENT_ID env vars."
+        return result
+
+    # ── Decode JWT to find the Managed Identity Object ID ────────────────────
+    try:
+        token = fabric_client._get_token()
+        parts = token.split(".")
+        if len(parts) >= 2:
+            padding = "=" * (4 - len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(parts[1] + padding))
+            result["managed_identity"] = {
+                "object_id": payload.get("oid", "(not found)"),
+                "app_id": payload.get("appid", payload.get("azp", "(not found)")),
+                "identity_type": payload.get("idtyp", "(not found)"),
+                "note": (
+                    "This object_id is the Backend App Service Managed Identity. "
+                    "It must be added to the Fabric workspace as Contributor or higher."
+                ),
+            }
+    except Exception as exc:
+        result["managed_identity"] = {"error": str(exc)}
+
+    # ── Test GET /dataAgents/{id} ─────────────────────────────────────────────
+    try:
+        agent_url = (
+            f"https://api.fabric.microsoft.com/v1"
+            f"/workspaces/{fabric_client.workspace_id}"
+            f"/dataAgents/{fabric_client.dataagent_id}"
+        )
+        agent_resp = _requests.get(agent_url, headers=fabric_client._headers(), timeout=20)
+        if agent_resp.ok:
+            agent_data = agent_resp.json()
+            raw_state = (
+                agent_data.get("state")
+                or agent_data.get("status")
+                or agent_data.get("publishState")
+                or "unknown"
+            )
+            result["agent_check"] = {
+                "reachable": True,
+                "http_status": agent_resp.status_code,
+                "agent_state": raw_state,
+                "queryable": str(raw_state).lower() not in ("draft", "unpublished", "inactive"),
+            }
+        else:
+            result["agent_check"] = {
+                "reachable": False,
+                "http_status": agent_resp.status_code,
+                "error": agent_resp.text[:400],
+                "likely_cause": (
+                    "HTTP 404 means the Backend Managed Identity is NOT a Fabric workspace member. "
+                    "Add the object_id shown in managed_identity to the workspace."
+                    if agent_resp.status_code == 404
+                    else f"HTTP {agent_resp.status_code} error."
+                ),
+            }
+    except Exception as exc:
+        result["agent_check"] = {"error": str(exc)}
+
+    # ── Actionable instructions ───────────────────────────────────────────────
+    mi_oid = result.get("managed_identity", {}).get("object_id", "<see managed_identity.object_id above>")
+    ws_id = fabric_client.workspace_id
+    agent_state = result.get("agent_check", {}).get("agent_state", "unknown")
+    result["instructions"] = {
+        "step1_add_mi_to_workspace": (
+            f"In Fabric portal -> Workspace -> Manage access -> Add member -> "
+            f"paste Object ID: {mi_oid} -> role: Contributor"
+        ),
+        "step2_check_agent_state": (
+            "Agent state is already Published — no action needed."
+            if result.get("agent_check", {}).get("queryable")
+            else (
+                f"Agent is in '{agent_state}' state. Open the Fabric portal, open the agent, "
+                f"click 'Publish'. URL: https://app.fabric.microsoft.com/groups/{ws_id}"
+            )
+        ),
+        "fabric_workspace_url": f"https://app.fabric.microsoft.com/groups/{ws_id}",
+    }
+
+    return result
+
 
 @app.post("/api/reset")
 async def reset_conversation(request: Request) -> Dict[str, str]:
