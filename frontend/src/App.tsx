@@ -36,10 +36,10 @@ const App: React.FC = () => {
 
   const sampleQuestions = [
     'Top 5 customers by LifetimeValue in Maharashtra',
-    'Which customers are high churn risk?',
-    'Show revenue trend for Karnataka',
-    'Count customers by State',
-    'Average ChurnRiskScore by Segment'
+    'Which customers have ChurnRiskScore above 80?',
+    'Show average MonthlyRevenue by State for Karnataka and Tamil Nadu',
+    'Count customers by Segment',
+    'List Startup customers in Delhi with LifetimeValue above 50000'
   ];
 
   const sendMessage = async () => {

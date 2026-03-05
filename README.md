@@ -202,10 +202,10 @@ Then re-run the GitHub Actions workflow to rebuild and deploy the Docker images 
 
 ```
 "Top 5 customers by LifetimeValue in Maharashtra"
-"Which customers are high churn risk?"
-"Show revenue trend by State"
+"Which customers have ChurnRiskScore above 80?"
+"Show average MonthlyRevenue by State for Karnataka and Tamil Nadu"
 "Count customers by Segment"
-"Average ChurnRiskScore by region"
+"List Startup customers in Delhi with LifetimeValue above 50000"
 "Customers in Karnataka with LifetimeValue above 100000"
 ```
 
@@ -247,10 +247,10 @@ The `Customer360` Delta table (1,000 records):
 | `FullName` | string | Customer name |
 | `State` | string | Indian state |
 | `City` | string | City |
-| `Segment` | string | Enterprise / SMB / Startup |
+| `Segment` | string | Enterprise / SMB / Startup / Consumer |
 | `LifetimeValue` | decimal | Total LTV in ₹ |
 | `MonthlyRevenue` | decimal | Monthly revenue in ₹ |
-| `ChurnRiskScore` | decimal | 0.0 (low) to 1.0 (high risk) |
+| `ChurnRiskScore` | decimal | 0.0 (low) to 100.0 (high risk) |
 | `LastPurchaseDate` | date | Most recent purchase |
 
 ---

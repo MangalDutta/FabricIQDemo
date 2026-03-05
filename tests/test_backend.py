@@ -110,6 +110,38 @@ class TestHealthEndpoints:
         assert resp.json() == {"status": "healthy"}
 
 
+# ─── Config endpoint tests ────────────────────────────────────────────────────
+
+class TestConfigEndpoint:
+    def test_config_returns_200(self, test_client_with_fabric):
+        resp = test_client_with_fabric.get("/api/config")
+        assert resp.status_code == 200
+
+    def test_config_returns_powerbi_url(self, test_client_with_fabric):
+        resp = test_client_with_fabric.get("/api/config")
+        data = resp.json()
+        assert "powerbi_report_url" in data
+        assert isinstance(data["powerbi_report_url"], str)
+
+    def test_config_reads_env_var(self):
+        """Config endpoint should return POWERBI_REPORT_URL from environment."""
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake",
+                "FABRIC_DATAAGENT_ID": "agent-fake",
+                "POWERBI_REPORT_URL": "https://app.powerbi.com/test-report",
+            },
+        ):
+            with patch("fabric_client.FabricClient", side_effect=Exception("no config")):
+                import app as app_module
+                importlib.reload(app_module)
+                client = TestClient(app_module.app)
+                resp = client.get("/api/config")
+                assert resp.status_code == 200
+                assert resp.json()["powerbi_report_url"] == "https://app.powerbi.com/test-report"
+
+
 # ─── Chat endpoint – happy path ───────────────────────────────────────────────
 
 class TestChatEndpointHappyPath:
