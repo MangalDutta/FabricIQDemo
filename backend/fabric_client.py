@@ -98,6 +98,10 @@ class FabricClient:
         # {user_id: conversationId}
         self._conversation_ids: Dict[str, str] = {}
 
+        # Per-user conversation history sent in each request payload
+        # {user_id: [{"role": "user"|"assistant", "content": "..."}]}
+        self._histories: Dict[str, List[Dict[str, str]]] = {}
+
         logger.info(
             "FabricClient initialized  workspace=%s  agent_id=%s  agent_name=%s",
             self.workspace_id,
@@ -198,23 +202,33 @@ class FabricClient:
     # ─── Helper: call primary endpoint ──────────────────────────────────────
 
     def _call_primary(
-        self, message: str, conversation_id: Optional[str]
-    ) -> requests.Response:
-        """POST to the native Data Agent /query endpoint."""
+        self, message: str, conversation_id: Optional[str],
+        history: Optional[List[Dict[str, str]]] = None,
+    ) -> Optional[requests.Response]:
+        """POST to the native Data Agent /query endpoint.
+
+        Returns the response, or None if a network/connection error occurs.
+        """
         payload: Dict[str, Any] = {"userMessage": message}
         if conversation_id:
             payload["conversationId"] = conversation_id
+        if history:
+            payload["history"] = history
 
         logger.debug(
             "POST %s  conversationId=%s  message=%.80s",
             self._primary_url(), conversation_id, message,
         )
-        return requests.post(
-            self._primary_url(),
-            headers=self._headers(),
-            json=payload,
-            timeout=120,
-        )
+        try:
+            return requests.post(
+                self._primary_url(),
+                headers=self._headers(),
+                json=payload,
+                timeout=120,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning("Primary endpoint request failed: %s", exc)
+            return None
 
     # ─── Helper: call OpenAI-compatible fallback endpoint ───────────────────
 
@@ -296,6 +310,7 @@ class FabricClient:
         cannot be recovered from.
         """
         conversation_id = self._conversation_ids.get(user_id)
+        history = self._histories.get(user_id, [])
 
         logger.info(
             "Fabric Data Agent query  user=%s  agent=%s  workspace=%s  "
@@ -309,7 +324,15 @@ class FabricClient:
 
         # ── Attempt 1: primary endpoint with current agent ID ────────────────
         for attempt in range(1, _QUERY_MAX_RETRIES + 1):
-            resp = self._call_primary(message, conversation_id)
+            resp = self._call_primary(message, conversation_id, history)
+
+            if resp is None:
+                logger.warning(
+                    "Primary endpoint returned no response on attempt %d/%d — "
+                    "network error or connection refused.",
+                    attempt, _QUERY_MAX_RETRIES,
+                )
+                break
 
             if resp.ok:
                 break
@@ -357,13 +380,14 @@ class FabricClient:
                         # Reset conversationId — new agent won't know old context
                         self._conversation_ids.pop(user_id, None)
                         conversation_id = None
-                        resp = self._call_primary(message, conversation_id)
-                        if resp.ok:
+                        resp = self._call_primary(message, conversation_id, history)
+                        if resp is not None and resp.ok:
                             break
-                        logger.error(
-                            "Discovered agent ID %s also returned %d: %s",
-                            discovered, resp.status_code, resp.text[:300],
-                        )
+                        if resp is not None:
+                            logger.error(
+                                "Discovered agent ID %s also returned %d: %s",
+                                discovered, resp.status_code, resp.text[:300],
+                            )
 
             # Non-recoverable on this attempt — break and try fallback
             break
@@ -430,10 +454,21 @@ class FabricClient:
                 # Keep existing conversationId if API didn't return a new one
                 pass
 
+        # Update per-user history for next turn
+        history_from_response = data.get("history")
+        if history_from_response is not None and isinstance(history_from_response, list):
+            self._histories[user_id] = history_from_response
+        else:
+            current_history = self._histories.get(user_id, [])
+            self._histories[user_id] = current_history + [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": answer},
+            ]
+
         timestamp = datetime.now(tz=timezone.utc).isoformat()
 
         return {
-            "answer": answer or "No response received from the Data Agent.",
+            "answer": answer or "No response received.",
             "timestamp": timestamp,
             "metadata": {
                 "workspace_id": self.workspace_id,
@@ -444,6 +479,7 @@ class FabricClient:
         }
 
     def reset_conversation(self, user_id: str) -> None:
-        """Clear the stored conversationId so the next message starts fresh."""
+        """Clear the stored conversationId and history so the next message starts fresh."""
         self._conversation_ids.pop(user_id, None)
+        self._histories.pop(user_id, None)
         logger.info("Conversation reset for user %s", user_id)
