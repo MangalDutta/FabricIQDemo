@@ -797,7 +797,7 @@ def get_default_semantic_model(
     workspace_id: str,
     lakehouse_name: str,
     token: str,
-    retries: int = 24,
+    retries: int = 8,
 ) -> Optional[str]:
     """
     Finds the default Power BI Semantic Model that Fabric auto-creates when
@@ -891,12 +891,23 @@ def get_default_semantic_model(
         return sm_id
 
     print(
-        f"   [WARN] Default semantic model '{lakehouse_name}' not found after "
+        f"\n   [WARN] Default semantic model '{lakehouse_name}' not found after "
         f"{retries} attempts ({retries * 30 // 60} min).\n"
-        "   This usually means the workspace is not assigned to a Fabric capacity.\n"
-        "   Assign the workspace to a Fabric capacity in the Fabric portal and\n"
-        "   re-run the deployment to let Fabric auto-create the default semantic model.\n"
-        "   You can also create a Power BI report manually in the Fabric portal."
+        "\n"
+        "   Checklist to fix this:\n"
+        "   1. Provide 'fabric_capacity_id' in the workflow inputs (most common cause).\n"
+        "      Without an F-capacity, Fabric does NOT auto-create the Semantic Model.\n"
+        "\n"
+        "   2. Enable Power BI tenant setting so the SP can read datasets:\n"
+        "      Power BI Admin Portal -> Tenant settings ->\n"
+        "      'Allow service principals to use Power BI APIs' -> Enable for your SP.\n"
+        "\n"
+        "   3. Ensure your SP is a Workspace Admin:\n"
+        f"      https://app.fabric.microsoft.com/groups/{workspace_id} ->\n"
+        "      Manage access -> verify your app is listed as Admin.\n"
+        "\n"
+        "   Power BI embedding will be skipped for now.\n"
+        "   Re-run the workflow with skip_data_upload=true + fabric_capacity_id set.\n"
     )
     return None
 
