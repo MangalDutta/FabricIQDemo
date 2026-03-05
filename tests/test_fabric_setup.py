@@ -117,13 +117,13 @@ class TestFabricRequest:
 class TestListWorkspaces:
     def test_returns_list(self):
         body = {"value": [{"id": "ws1", "displayName": "Test"}]}
-        with patch("requests.request", return_value=_ok_response(body)):
+        with patch("requests.get", return_value=_ok_response(body)):
             result = fs.list_workspaces("tok")
         assert isinstance(result, list)
         assert result[0]["id"] == "ws1"
 
     def test_returns_empty_list_when_no_value(self):
-        with patch("requests.request", return_value=_ok_response({})):
+        with patch("requests.get", return_value=_ok_response({})):
             result = fs.list_workspaces("tok")
         assert result == []
 
@@ -135,7 +135,7 @@ class TestGetOrCreateWorkspace:
         list_body = {
             "value": [{"id": "ws-exists", "displayName": "MyWorkspace", "capacityId": "cap1"}]
         }
-        with patch("requests.request", return_value=_ok_response(list_body)):
+        with patch("requests.get", return_value=_ok_response(list_body)):
             ws_id = fs.get_or_create_workspace("MyWorkspace", "cap1", "tok")
         assert ws_id == "ws-exists"
 
@@ -145,11 +145,8 @@ class TestGetOrCreateWorkspace:
         }
         assign_body = {}
 
-        responses = [
-            _ok_response(list_body),    # GET /workspaces
-            _ok_response(assign_body),  # POST /assignToCapacity
-        ]
-        with patch("requests.request", side_effect=responses):
+        with patch("requests.get", return_value=_ok_response(list_body)), \
+             patch("requests.request", return_value=_ok_response(assign_body)):
             ws_id = fs.get_or_create_workspace("WS", "new-cap", "tok")
         assert ws_id == "ws-1"
 
@@ -165,24 +162,21 @@ class TestGetOrCreateWorkspace:
         }
         create_resp.text = "{}"
 
-        responses = [
-            _ok_response(list_body),  # GET /workspaces
-            create_resp,              # POST /workspaces
-        ]
-        with patch("requests.request", side_effect=responses):
+        with patch("requests.get", return_value=_ok_response(list_body)), \
+             patch("requests.post", return_value=create_resp):
             ws_id = fs.get_or_create_workspace("NewWS", "cap1", "tok")
         assert ws_id == "new-ws-id"
 
-    def test_raises_when_location_header_missing(self):
+    def test_raises_when_workspace_id_unavailable(self):
         list_body = {"value": []}
         create_resp = MagicMock()
         create_resp.ok = True
         create_resp.status_code = 201
-        create_resp.json.return_value = {}
-        create_resp.headers = {}   # no Location
+        create_resp.json.return_value = {}   # no id
+        create_resp.headers = {}              # no Location
         create_resp.text = "{}"
-        responses = [_ok_response(list_body), create_resp]
-        with patch("requests.request", side_effect=responses):
+        with patch("requests.get", return_value=_ok_response(list_body)), \
+             patch("requests.post", return_value=create_resp):
             with pytest.raises(RuntimeError, match="Location"):
                 fs.get_or_create_workspace("NewWS", "cap1", "tok")
 
@@ -389,10 +383,14 @@ class TestMain:
         with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
              patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
              patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
              patch("fabric_setup.load_table_from_file"), \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"):
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"), \
+             patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.get_default_semantic_model", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -410,10 +408,14 @@ class TestMain:
         with patch("fabric_setup.get_fabric_token", return_value="tok"), \
              patch("fabric_setup.get_storage_token") as mock_sto, \
              patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake") as mock_upload, \
              patch("fabric_setup.load_table_from_file") as mock_load, \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"):
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"), \
+             patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.get_default_semantic_model", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -427,3 +429,145 @@ class TestMain:
         mock_upload.assert_not_called()
         mock_load.assert_not_called()
         mock_sto.assert_not_called()
+
+
+# ─── configure_dataagent ──────────────────────────────────────────────────────
+
+class TestConfigureDataagent:
+    def test_succeeds_with_patch_method(self):
+        """configure_dataagent should succeed on PATCH 200 (first attempt)."""
+        ok_resp = _ok_response({}, 200)
+        with patch("requests.request", return_value=ok_resp) as mock_req:
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+        # PATCH should be the first method tried
+        first_call = mock_req.call_args_list[0]
+        assert first_call[0][0] == "PATCH"
+
+    def test_falls_back_to_put_when_patch_returns_404(self):
+        """configure_dataagent should fall back from PATCH→PUT on 404."""
+        not_found = _error_response(404, '{"errorCode":"EntityNotFound"}')
+        ok_resp = _ok_response({}, 200)
+        # First PATCH payload returns 404, next method PUT payload returns 200
+        responses = [not_found, ok_resp]
+        with patch("requests.request", side_effect=responses):
+            # Should not raise
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+
+    def test_succeeds_on_204(self):
+        resp = MagicMock()
+        resp.status_code = 204
+        resp.headers = {}
+        resp.text = ""
+        with patch("requests.request", return_value=resp):
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+
+    def test_non_fatal_on_all_failures(self):
+        """configure_dataagent must not raise even when all attempts fail."""
+        err_resp = _error_response(500, "Server error")
+        with patch("requests.request", return_value=err_resp):
+            # Should not raise – it logs a warning and returns
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+
+    def test_includes_object_type_in_selected_objects(self):
+        """selectedObjects must include objectType:'Table' for Fabric API compatibility."""
+        ok_resp = _ok_response({}, 200)
+        with patch("requests.request", return_value=ok_resp) as mock_req:
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+        # Inspect the JSON body of the first call
+        first_call_kwargs = mock_req.call_args_list[0][1]
+        body = first_call_kwargs.get("json", {})
+        selected = (
+            body.get("configuration", {})
+                .get("dataSources", [{}])[0]
+                .get("selectedObjects", [{}])[0]
+        )
+        assert selected.get("objectType") == "Table"
+
+    def test_succeeds_on_202_polls_operation(self):
+        accept_resp = MagicMock()
+        accept_resp.status_code = 202
+        accept_resp.headers = {"x-ms-operation-id": "op-cfg-1"}
+        accept_resp.text = "{}"
+        with patch("requests.request", return_value=accept_resp), \
+             patch("fabric_setup.poll_operation") as mock_poll:
+            mock_poll.return_value = {"status": "Succeeded"}
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "T", "tok")
+        mock_poll.assert_called_once_with("op-cfg-1", "tok", "data agent configuration")
+
+
+# ─── trigger_default_semantic_model ──────────────────────────────────────────
+
+class TestTriggerDefaultSemanticModel:
+    def test_succeeds_on_200(self):
+        with patch("requests.post", return_value=_ok_response({}, 200)):
+            # Should not raise
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+
+    def test_succeeds_on_201(self):
+        with patch("requests.post", return_value=_ok_response({"id": "sm1"}, 201)):
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+
+    def test_handles_409_gracefully(self):
+        """409 Conflict means the model already exists — should not raise."""
+        conflict = _error_response(409, '{"errorCode":"Conflict"}')
+        with patch("requests.post", return_value=conflict):
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+
+    def test_handles_error_gracefully(self):
+        """Non-2xx/409 response must be treated as non-fatal."""
+        err = _error_response(500, "Internal error")
+        with patch("requests.post", return_value=err):
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+
+    def test_handles_exception_gracefully(self):
+        """Network exception must be treated as non-fatal."""
+        with patch("requests.post", side_effect=ConnectionError("no network")):
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+
+    def test_calls_correct_endpoint(self):
+        with patch("requests.post", return_value=_ok_response({}, 200)) as mock_post:
+            fs.trigger_default_semantic_model("ws-abc", "lh-xyz", "tok")
+        url = mock_post.call_args[0][0]
+        assert "ws-abc" in url
+        assert "lh-xyz" in url
+        assert "createDefaultSemanticModel" in url
+
+    def test_polls_on_202(self):
+        accept_resp = MagicMock()
+        accept_resp.status_code = 202
+        accept_resp.headers = {"x-ms-operation-id": "op-sm-1"}
+        accept_resp.text = "{}"
+        with patch("requests.post", return_value=accept_resp), \
+             patch("fabric_setup.poll_operation") as mock_poll:
+            mock_poll.return_value = {"status": "Succeeded"}
+            fs.trigger_default_semantic_model("ws1", "lh1", "tok")
+        mock_poll.assert_called_once_with("op-sm-1", "tok", "default semantic model creation")
+
+
+# ─── get_default_semantic_model (updated signature) ──────────────────────────
+
+class TestGetDefaultSemanticModel:
+    def test_returns_id_when_found_immediately(self):
+        sm_body = {"value": [{"id": "sm-1", "displayName": "MyLH", "type": "SemanticModel"}]}
+        with patch("fabric_setup.trigger_default_semantic_model"), \
+             patch("requests.request", return_value=_ok_response(sm_body)):
+            result = fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
+        assert result == "sm-1"
+
+    def test_returns_none_when_not_found(self):
+        empty_body = {"value": []}
+        with patch("fabric_setup.trigger_default_semantic_model"), \
+             patch("requests.request", return_value=_ok_response(empty_body)), \
+             patch("fabric_setup._find_semantic_model_via_powerbi_api", return_value=None), \
+             patch("time.sleep"):
+            result = fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
+        assert result is None
+
+    def test_calls_trigger_before_polling(self):
+        empty_body = {"value": []}
+        with patch("fabric_setup.trigger_default_semantic_model") as mock_trigger, \
+             patch("requests.request", return_value=_ok_response(empty_body)), \
+             patch("fabric_setup._find_semantic_model_via_powerbi_api", return_value=None), \
+             patch("time.sleep"):
+            fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
+        mock_trigger.assert_called_once_with("ws1", "lh1", "tok")

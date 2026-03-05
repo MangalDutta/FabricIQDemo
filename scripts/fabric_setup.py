@@ -309,6 +309,11 @@ def get_or_create_workspace(
         workspace_id = urlparse(location).path.rstrip("/").split("/")[-1] if location else ""
         if not workspace_id:
             workspace_id = create_resp.json().get("id", "")
+        if not workspace_id:
+            raise RuntimeError(
+                "Workspace created but could not determine workspace ID: "
+                "neither the Location header nor the response body contained an ID."
+            )
         print(f"   ✓ Created workspace: {workspace_name} (ID: {workspace_id})")
         return workspace_id
 
@@ -822,24 +827,26 @@ def configure_dataagent(
     token: str,
 ) -> None:
     """
-    Updates the Data Agent configuration via
-    PUT /v1/workspaces/{workspaceId}/dataAgents/{dataAgentId}
-    to link the Lakehouse and select the specific Delta table.
+    Updates the Data Agent configuration to link the Lakehouse and select the
+    specific Delta table.
 
     This is the step that makes the agent aware of *which* data it should query.
     Without this step the agent has no data source and will return empty answers.
 
-    Tries several payload shapes to handle API preview version differences.
+    Tries several HTTP methods (PATCH then PUT) and payload shapes to handle
+    differences across Fabric API preview versions.  PATCH is tried first as
+    some Fabric regions return HTTP 404 for PUT on the dataAgents endpoint.
     """
     print(f"   Configuring Data Agent '{agent_name}' → Lakehouse '{lakehouse_id}' / table '{table_name}'...")
 
-    # Build data source with table selection (try progressively simpler payloads)
+    # Build data source with table selection (try progressively simpler payloads).
+    # objectType:"Table" is required by some Fabric preview API versions.
     data_source_with_table = {
         "type": "Lakehouse",
         "workspaceId": workspace_id,
         "itemId": lakehouse_id,
         "selectedObjects": [
-            {"schema": "dbo", "name": table_name}
+            {"schema": "dbo", "name": table_name, "objectType": "Table"}
         ],
     }
     data_source_basic = {
@@ -880,39 +887,57 @@ def configure_dataagent(
         },
     ]
 
+    agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
+    req_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
     last_err = ""
-    for i, payload in enumerate(payloads, 1):
-        print(f"   Configure attempt {i}: {list(payload.get('configuration', {}).get('dataSources', [{}])[0].keys())}")
-        try:
-            resp = requests.put(
-                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=60,
-            )
-            if resp.status_code in (200, 201, 204):
-                print(f"   OK  Data Agent configured successfully (HTTP {resp.status_code}).")
-                return
-            if resp.status_code == 202:
-                # Long-running — poll if we have an operation ID
-                op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
-                if op_id:
-                    poll_operation(op_id, token, "data agent configuration")
-                print("   OK  Data Agent configuration accepted (202).")
-                return
-            last_err = f"HTTP {resp.status_code}: {resp.text[:300]}"
-            print(f"   Attempt {i} failed ({resp.status_code}): {resp.text[:200]}")
-        except Exception as exc:
-            last_err = str(exc)
-            print(f"   Attempt {i} exception: {exc}")
+    attempt = 0
+    # Try PATCH first (partial update), then PUT (full replace) for each payload.
+    # PATCH is preferred because some Fabric API preview versions return HTTP 404
+    # for PUT on the dataAgents endpoint while correctly handling PATCH.
+    for method in ("PATCH", "PUT"):
+        for i, payload in enumerate(payloads, 1):
+            attempt += 1
+            ds_keys = list(payload.get("configuration", {}).get("dataSources", [{}])[0].keys())
+            print(f"   Configure attempt {attempt} ({method}): {ds_keys}")
+            try:
+                resp = requests.request(
+                    method,
+                    agent_url,
+                    headers=req_headers,
+                    json=payload,
+                    timeout=60,
+                )
+                if resp.status_code in (200, 201, 204):
+                    print(f"   OK  Data Agent configured successfully (HTTP {resp.status_code}).")
+                    return
+                if resp.status_code == 202:
+                    # Long-running — poll if we have an operation ID
+                    op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
+                    if op_id:
+                        poll_operation(op_id, token, "data agent configuration")
+                    print("   OK  Data Agent configuration accepted (202).")
+                    return
+                if resp.status_code == 404:
+                    # This HTTP method is not available for this endpoint — breaking
+                    # from the inner (payloads) loop naturally advances to the next
+                    # method in the outer loop (e.g. PATCH → PUT).
+                    last_err = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                    print(f"   Attempt {attempt} ({method}) returned 404 — trying next method/payload...")
+                    break  # Break inner (payloads) loop; continue outer (methods) loop
+                last_err = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                print(f"   Attempt {attempt} ({method}) failed ({resp.status_code}): {resp.text[:200]}")
+            except Exception as exc:
+                last_err = str(exc)
+                print(f"   Attempt {attempt} ({method}) exception: {exc}")
 
     # Non-fatal: log a warning and continue — the agent may still answer queries
     # if it was already configured correctly from a prior run.
     print(
-        f"   WARNING: Data Agent configuration failed after {len(payloads)} attempts. "
+        f"   WARNING: Data Agent configuration failed after {attempt} attempts. "
         f"Last error: {last_err}\n"
         "   The agent may not have the Lakehouse linked. "
         "   You can link it manually in the Fabric portal:\n"
@@ -989,6 +1014,67 @@ def publish_dataagent(
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
 
 
+def trigger_default_semantic_model(
+    workspace_id: str,
+    lakehouse_id: str,
+    token: str,
+) -> None:
+    """
+    Explicitly requests Fabric to create (or refresh) the default Power BI
+    Semantic Model for a Lakehouse.
+
+    Calls POST /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}/createDefaultSemanticModel.
+
+    Without an explicit trigger the semantic model may take many minutes to
+    auto-materialise (or never appear if Fabric's background provisioner has not
+    run yet).  This call accelerates that process.
+
+    Non-fatal: silently continues if the endpoint returns an error (the model
+    may already exist, the endpoint may not be available in the current preview
+    version, or the capacity type may not support it).
+    """
+    url = (
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+        f"/lakehouses/{lakehouse_id}/createDefaultSemanticModel"
+    )
+    print("   Triggering default semantic model creation via Fabric API...")
+    try:
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={},
+            timeout=60,
+        )
+        if resp.status_code in (200, 201, 204):
+            print("   ✓ Semantic model creation triggered successfully.")
+        elif resp.status_code == 202:
+            op_id = (
+                resp.headers.get("x-ms-operation-id")
+                or resp.headers.get("x-ms-operationid")
+            )
+            if op_id:
+                try:
+                    poll_operation(op_id, token, "default semantic model creation")
+                    print("   ✓ Semantic model creation completed.")
+                except Exception as poll_exc:
+                    print(f"   [WARN] Semantic model creation polling failed (non-fatal): {poll_exc}")
+            else:
+                print("   Semantic model creation accepted (202) — no operation ID to poll.")
+        elif resp.status_code == 409:
+            # Conflict = model already exists, which is fine
+            print("   Semantic model already exists (409 Conflict) — skipping creation.")
+        else:
+            print(
+                f"   [WARN] createDefaultSemanticModel returned HTTP {resp.status_code}: "
+                f"{resp.text[:200]} (non-fatal)"
+            )
+    except Exception as exc:
+        print(f"   [WARN] createDefaultSemanticModel call failed (non-fatal): {exc}")
+
+
 def _find_semantic_model_via_powerbi_api(
     workspace_id: str,
     lakehouse_name: str,
@@ -1041,6 +1127,7 @@ def _find_semantic_model_via_powerbi_api(
 def get_default_semantic_model(
     workspace_id: str,
     lakehouse_name: str,
+    lakehouse_id: str,
     token: str,
     retries: int = 8,
 ) -> Optional[str]:
@@ -1049,9 +1136,12 @@ def get_default_semantic_model(
     a Lakehouse is provisioned on a Fabric capacity workspace.
     Its display name matches the Lakehouse name.
 
-    Retries up to `retries` times (30-second intervals, ~12 min total) because
-    Fabric can take several minutes to materialise the default semantic model
-    after a table load -- especially on first deploy.
+    Explicitly triggers creation via
+    POST /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}/createDefaultSemanticModel
+    before polling, so the model appears faster (especially on first deploy).
+
+    Retries up to `retries` times (30-second intervals) because Fabric can take
+    several minutes to materialise the default semantic model after a table load.
 
     Search strategy (in order):
       1. Fabric Items API  type=SemanticModel  (primary)
@@ -1065,6 +1155,10 @@ def get_default_semantic_model(
     Returns the semantic model item ID, or None if not found.
     """
     print(f"Looking for default semantic model: {lakehouse_name}")
+
+    # Explicitly trigger creation so Fabric materialises the model without
+    # waiting for the background provisioner (which can take many minutes).
+    trigger_default_semantic_model(workspace_id, lakehouse_id, token)
 
     for attempt in range(1, retries + 1):
         # 1. Fabric Items API -- type=SemanticModel only.
@@ -1488,7 +1582,7 @@ def main(argv=None) -> None:
         # Re-acquire token in case it expired during data upload
         fabric_token = get_fabric_token()
         semantic_model_id = get_default_semantic_model(
-            workspace_id, args.lakehouse_name, fabric_token
+            workspace_id, args.lakehouse_name, lakehouse_id, fabric_token
         )
 
         # ── 7 / 8. Power BI Report ────────────────────────────────────────
