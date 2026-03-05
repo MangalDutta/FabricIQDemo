@@ -163,7 +163,7 @@ def main() -> None:
 
     # Step 2: List agents (for diagnostics)
     if not agent_ok:
-        agents = list_agents(args.workspace_id, args.agent_id, token)
+        agents = list_agents(args.workspace_id, token)
 
     # Step 3: Try native query
     native_ok = query_native(args.workspace_id, args.agent_id, args.question, token)
