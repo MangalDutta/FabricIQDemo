@@ -406,3 +406,18 @@ class TestFabricClientChat:
         assert result["metadata"]["source"] == "fabric_data_agent"
         assert result["metadata"]["workspace_id"] == "ws-test-guid-1234"
         assert result["metadata"]["dataagent_id"] == "agent-test-guid-5678"
+
+    def test_chat_retries_and_raises_clear_error_when_no_http_response(self):
+        client = self._make_client()
+        import fabric_client as fc_module
+
+        with patch.object(client, "_call_primary", return_value=None) as mock_primary:
+            with patch.object(client, "_call_openai_compat", return_value=None):
+                with patch("fabric_client.time.sleep", return_value=None):
+                    with pytest.raises(
+                        RuntimeError,
+                        match="no HTTP response from either endpoint",
+                    ):
+                        client.chat("u8", "test")
+
+        assert mock_primary.call_count == fc_module._QUERY_MAX_RETRIES

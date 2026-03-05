@@ -332,6 +332,9 @@ class FabricClient:
                     "network error or connection refused.",
                     attempt, _QUERY_MAX_RETRIES,
                 )
+                if attempt < _QUERY_MAX_RETRIES:
+                    time.sleep(_QUERY_RETRY_WAIT)
+                    continue
                 break
 
             if resp.ok:
@@ -410,6 +413,12 @@ class FabricClient:
 
         # ── Raise if still not ok ─────────────────────────────────────────────
         if not resp or not resp.ok:
+            if resp is None:
+                raise RuntimeError(
+                    "Fabric Data Agent returned no HTTP response from either endpoint. "
+                    "Likely network timeout/connection issue between the web app and "
+                    "Fabric API."
+                )
             status = resp.status_code if resp else 0
             detail = resp.text[:400] if resp else "no response"
 
