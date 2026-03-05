@@ -415,12 +415,13 @@ class FabricClient:
         if not resp or not resp.ok:
             if resp is None:
                 raise RuntimeError(
-                    "Fabric Data Agent returned no HTTP response from either endpoint. "
+                    "Fabric Data Agent returned no HTTP response from primary and fallback endpoints. "
                     "Likely network timeout/connection issue between the web app and "
-                    "Fabric API."
+                    "Fabric API. Please check network connectivity and endpoint availability. "
+                    f"(primary={self._primary_url()}, fallback={self._openai_compat_url()})"
                 )
-            status = resp.status_code if resp else 0
-            detail = resp.text[:400] if resp else "no response"
+            status = resp.status_code
+            detail = resp.text[:400]
 
             # Build a helpful, actionable error message
             if status == 404:
