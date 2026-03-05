@@ -741,6 +741,181 @@ def get_or_create_dataagent(
     )
 
 
+# ─── Fabric Data Agent – configure (link Lakehouse + tables) ─────────────────
+
+def configure_dataagent(
+    workspace_id: str,
+    agent_id: str,
+    agent_name: str,
+    lakehouse_id: str,
+    table_name: str,
+    token: str,
+) -> None:
+    """
+    Updates the Data Agent configuration via
+    PUT /v1/workspaces/{workspaceId}/dataAgents/{dataAgentId}
+    to link the Lakehouse and select the specific Delta table.
+
+    This is the step that makes the agent aware of *which* data it should query.
+    Without this step the agent has no data source and will return empty answers.
+
+    Tries several payload shapes to handle API preview version differences.
+    """
+    print(f"   Configuring Data Agent '{agent_name}' → Lakehouse '{lakehouse_id}' / table '{table_name}'...")
+
+    # Build data source with table selection (try progressively simpler payloads)
+    data_source_with_table = {
+        "type": "Lakehouse",
+        "workspaceId": workspace_id,
+        "itemId": lakehouse_id,
+        "selectedObjects": [
+            {"schema": "dbo", "name": table_name}
+        ],
+    }
+    data_source_basic = {
+        "type": "Lakehouse",
+        "workspaceId": workspace_id,
+        "itemId": lakehouse_id,
+    }
+
+    payloads = [
+        # Attempt 1: full payload with table selection + instructions
+        {
+            "displayName": agent_name,
+            "description": "Customer360 conversational analytics agent",
+            "configuration": {
+                "dataSources": [data_source_with_table],
+                "instructions": (
+                    f"You are a customer analytics assistant. "
+                    f"Answer questions about the '{table_name}' table in the Customer360 Lakehouse. "
+                    "Provide insights about customer segments, churn risk, lifetime value, and revenue."
+                ),
+            },
+        },
+        # Attempt 2: table selection without instructions
+        {
+            "displayName": agent_name,
+            "description": "Customer360 conversational analytics agent",
+            "configuration": {
+                "dataSources": [data_source_with_table],
+            },
+        },
+        # Attempt 3: just Lakehouse linkage, no explicit table selection
+        {
+            "displayName": agent_name,
+            "description": "Customer360 conversational analytics agent",
+            "configuration": {
+                "dataSources": [data_source_basic],
+            },
+        },
+    ]
+
+    last_err = ""
+    for i, payload in enumerate(payloads, 1):
+        print(f"   Configure attempt {i}: {list(payload.get('configuration', {}).get('dataSources', [{}])[0].keys())}")
+        try:
+            resp = requests.put(
+                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=60,
+            )
+            if resp.status_code in (200, 201, 204):
+                print(f"   OK  Data Agent configured successfully (HTTP {resp.status_code}).")
+                return
+            if resp.status_code == 202:
+                # Long-running — poll if we have an operation ID
+                op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
+                if op_id:
+                    poll_operation(op_id, token, "data agent configuration")
+                print("   OK  Data Agent configuration accepted (202).")
+                return
+            last_err = f"HTTP {resp.status_code}: {resp.text[:300]}"
+            print(f"   Attempt {i} failed ({resp.status_code}): {resp.text[:200]}")
+        except Exception as exc:
+            last_err = str(exc)
+            print(f"   Attempt {i} exception: {exc}")
+
+    # Non-fatal: log a warning and continue — the agent may still answer queries
+    # if it was already configured correctly from a prior run.
+    print(
+        f"   WARNING: Data Agent configuration failed after {len(payloads)} attempts. "
+        f"Last error: {last_err}\n"
+        "   The agent may not have the Lakehouse linked. "
+        "   You can link it manually in the Fabric portal:\n"
+        f"   https://app.fabric.microsoft.com/groups/{workspace_id} "
+        f"-> Open '{agent_name}' -> Add data source -> Lakehouse"
+    )
+
+
+# ─── Fabric Data Agent – publish / activate ───────────────────────────────────
+
+def publish_dataagent(
+    workspace_id: str,
+    agent_id: str,
+    agent_name: str,
+    token: str,
+) -> None:
+    """
+    Publishes / activates the Data Agent so it is ready to serve NL queries.
+
+    Tries several endpoint patterns used across Fabric API preview versions:
+      1. POST /v1/workspaces/{id}/dataAgents/{id}/publish
+      2. POST /v1/workspaces/{id}/dataAgents/{id}/activate
+      3. POST /v1/workspaces/{id}/items/{id}/publish  (generic item publish)
+
+    Failure is non-fatal with a clear manual fallback message — the agent may
+    already be active if it was created via the dedicated /dataAgents endpoint.
+    """
+    print(f"   Publishing Data Agent '{agent_name}'...")
+
+    endpoints = [
+        f"/workspaces/{workspace_id}/dataAgents/{agent_id}/publish",
+        f"/workspaces/{workspace_id}/dataAgents/{agent_id}/activate",
+        f"/workspaces/{workspace_id}/items/{agent_id}/publish",
+    ]
+
+    for endpoint in endpoints:
+        try:
+            resp = requests.post(
+                f"{FABRIC_BASE_URL}{endpoint}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={},
+                timeout=60,
+            )
+            if resp.status_code in (200, 201, 204):
+                print(f"   OK  Data Agent published via {endpoint} (HTTP {resp.status_code}).")
+                return
+            if resp.status_code == 202:
+                op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
+                if op_id:
+                    poll_operation(op_id, token, "data agent publish")
+                print(f"   OK  Data Agent publish accepted via {endpoint} (202).")
+                return
+            if resp.status_code == 404:
+                # Endpoint doesn't exist in this API version — try next
+                continue
+            print(f"   [{endpoint}] returned HTTP {resp.status_code}: {resp.text[:200]}")
+        except Exception as exc:
+            print(f"   [{endpoint}] exception (non-fatal): {exc}")
+
+    # If none of the endpoints worked it likely means the agent is published
+    # automatically upon creation in the current preview version.
+    print(
+        "   INFO: No dedicated publish endpoint responded successfully.\n"
+        "   The Data Agent may already be active (this is normal for agents\n"
+        "   created via the /dataAgents endpoint — they publish on creation).\n"
+        "   If queries fail, open the Fabric portal and click 'Publish' manually:\n"
+        f"   https://app.fabric.microsoft.com/groups/{workspace_id} -> Open '{agent_name}'"
+    )
+
+
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
 
 
@@ -1184,6 +1359,24 @@ def main(argv=None) -> None:
         dataagent_id = get_or_create_dataagent(
             workspace_id, args.dataagent_name, lakehouse_id, fabric_token
         )
+
+        # ── 5a / 6a. Configure Data Agent (link Lakehouse + table) ────────
+        print(f"\n🔗 {step_label}a: Configure Data Agent – link Lakehouse table")
+        # Re-acquire token before the configure call (previous steps may have
+        # taken long enough for the token to be near expiry).
+        fabric_token = get_fabric_token()
+        configure_dataagent(
+            workspace_id,
+            dataagent_id,
+            args.dataagent_name,
+            lakehouse_id,
+            args.table_name,
+            fabric_token,
+        )
+
+        # ── 5b / 6b. Publish Data Agent ───────────────────────────────────
+        print(f"\n📢 {step_label}b: Publish Data Agent")
+        publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
 
         # ── 6 / 7. Semantic Model (default from Lakehouse) ────────────────
         next_step = 6 if args.skip_data_upload else 7
