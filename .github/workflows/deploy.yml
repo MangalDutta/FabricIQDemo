@@ -237,12 +237,29 @@ jobs:
               fi
             fi
 
-            echo "acr_name=$ACR_NAME"             >> $GITHUB_OUTPUT
-            echo "backend_app=$BE_APP"             >> $GITHUB_OUTPUT
-            echo "frontend_app=$FE_APP"            >> $GITHUB_OUTPUT
-            echo "kv_name=$KV_NAME"               >> $GITHUB_OUTPUT
-            echo "app_insights_cs=$APPI_CS"       >> $GITHUB_OUTPUT
-            echo "fabric_capacity_id=$FABRIC_CAP_ID" >> $GITHUB_OUTPUT
+            # Get the backend App Service System-Assigned Managed Identity principal ID.
+            # This MI must be added to the Fabric workspace so it can call the
+            # Data Agent query API.  Without workspace membership Fabric returns
+            # HTTP 404 EntityNotFound (not 401) for all resource requests from the MI.
+            BE_MI_PRINCIPAL_ID=$(az webapp identity show \
+              --name "$BE_APP" \
+              --resource-group "$RG" \
+              --query "principalId" -o tsv 2>/dev/null || echo "")
+
+            if [ -n "$BE_MI_PRINCIPAL_ID" ]; then
+              echo "  [OK] Backend MI principal ID: $BE_MI_PRINCIPAL_ID"
+            else
+              echo "  [WARN] Could not retrieve backend MI principal ID. The MI will not be"
+              echo "         added to the Fabric workspace automatically. Add it manually."
+            fi
+
+            echo "acr_name=$ACR_NAME"                       >> $GITHUB_OUTPUT
+            echo "backend_app=$BE_APP"                       >> $GITHUB_OUTPUT
+            echo "frontend_app=$FE_APP"                      >> $GITHUB_OUTPUT
+            echo "kv_name=$KV_NAME"                         >> $GITHUB_OUTPUT
+            echo "app_insights_cs=$APPI_CS"                 >> $GITHUB_OUTPUT
+            echo "fabric_capacity_id=$FABRIC_CAP_ID"        >> $GITHUB_OUTPUT
+            echo "be_mi_principal_id=$BE_MI_PRINCIPAL_ID"   >> $GITHUB_OUTPUT
             echo "ACR: $ACR_NAME  Backend: $BE_APP  Frontend: $FE_APP  KV: $KV_NAME"
 
       # --- Step 3: Build backend Docker image ---
@@ -292,6 +309,20 @@ jobs:
             SKIP_FLAG="--skip_data_upload"
           fi
 
+          # Pass the backend App Service MI principal ID so fabric_setup.py
+          # can add it to the Fabric workspace as a Contributor.
+          # This is required for the backend to call the Fabric Data Agent query API.
+          BE_MI="${{ steps.outputs.outputs.be_mi_principal_id }}"
+          MI_FLAG=""
+          if [ -n "$BE_MI" ]; then
+            MI_FLAG="--app_service_principal_id $BE_MI"
+            echo "  Backend MI principal ID: $BE_MI (will be added to Fabric workspace)"
+          else
+            echo "  WARNING: Backend MI principal ID not available."
+            echo "  The App Service Managed Identity will NOT be added to the Fabric workspace."
+            echo "  Re-run the workflow after the App Service has been created with a MI."
+          fi
+
           python scripts/fabric_setup.py \
             --workspace_name "${{ inputs.workspace_name }}" \
             --lakehouse_name "${{ inputs.lakehouse_name }}" \
@@ -300,7 +331,8 @@ jobs:
             --dataagent_name "${{ inputs.dataagent_name }}" \
             --capacity_id "$CAPACITY_ID" \
             --report_name "Customer360 Report" \
-            $SKIP_FLAG
+            $SKIP_FLAG \
+            $MI_FLAG
 
           echo "Fabric setup complete"
 

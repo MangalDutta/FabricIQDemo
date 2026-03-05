@@ -8,18 +8,22 @@ Authentication:
   Uses DefaultAzureCredential (Managed Identity on App Service, or
   CLI/env credentials locally).  Tokens are cached and auto-refreshed.
 
-Conversation history:
-  Per-user history is kept in memory so follow-up questions maintain
-  context within a single app-service instance.  For production you
-  would persist this in Redis or a database.
+  IMPORTANT: The App Service Managed Identity MUST be a member of the
+  Fabric workspace (Contributor or higher).  Without workspace membership
+  Fabric returns HTTP 404 EntityNotFound on all resource requests from
+  that identity (it hides resources from non-members as a security measure,
+  not 401/403).  The deploy workflow adds the MI automatically via
+  fabric_setup.py --app_service_principal_id.
+
+Conversation context:
+  The Fabric Data Agent maintains conversation history server-side using
+  a conversationId string.  The backend tracks one conversationId per
+  user (in memory) and includes it on follow-up requests.
 
 Environment variables required:
   FABRIC_WORKSPACE_ID   - Fabric workspace GUID
-                          (output from fabric_setup.py as 'workspace_id')
   FABRIC_DATAAGENT_ID   - Fabric Data Agent item GUID
-                          (output from fabric_setup.py as 'dataagent_id')
   FABRIC_DATAAGENT_NAME - Display name of the Data Agent (default: Customer360Agent)
-                          Used to auto-rediscover the agent when the stored ID is stale.
 """
 
 import logging
@@ -40,34 +44,36 @@ FABRIC_BASE_URL = "https://api.fabric.microsoft.com/v1"
 # Seconds before token expiry to pro-actively refresh
 _TOKEN_REFRESH_MARGIN = 60
 
-# Retry config for EntityNotFound on /query — newly provisioned agents need
-# a short warm-up period before they become queryable.
-_AGENT_NOT_READY_RETRIES = 4
-_AGENT_NOT_READY_WAIT = 15  # seconds between retries (up to ~1 min total)
+# Retry settings for transient errors on a freshly deployed agent
+_QUERY_MAX_RETRIES = 3
+_QUERY_RETRY_WAIT = 10   # seconds
 
 
 class FabricClient:
     """
     Chat client that calls the Fabric Data Agent query API directly.
 
-    API endpoint used:
+    Primary API endpoint:
         POST /v1/workspaces/{workspaceId}/dataAgents/{dataAgentId}/query
 
     Request body:
         {
             "userMessage": "<natural language question>",
-            "history": [
-                {"role": "user",      "content": "..."},
-                {"role": "assistant", "content": "..."}
-            ]
+            "conversationId": "<string, omit on first turn>"
         }
 
-    Response shape (approximate – the API is in preview; multiple field
-    names are tried for forward-compatibility):
+    Response shape (Fabric Data Agent preview):
         {
-            "answer": "<text answer>",
-            "history": [...]           // optional, updated turn list
+            "response":       "<text answer>",
+            "conversationId": "<string for next turn>",
+            "type":           "answer",
+            "citations":      []
         }
+
+    Fallback endpoint (OpenAI-compatible, used when primary returns 404/405):
+        POST /v1/workspaces/{workspaceId}/aiskills/{agentId}/aiassistant/openai
+        Body: {"messages": [{"role": "user", "content": "..."}]}
+        Response: standard OpenAI chat-completion format
     """
 
     def __init__(self) -> None:
@@ -78,13 +84,9 @@ class FabricClient:
         ).strip()
 
         if not self.workspace_id:
-            raise ValueError(
-                "FABRIC_WORKSPACE_ID environment variable is required."
-            )
+            raise ValueError("FABRIC_WORKSPACE_ID environment variable is required.")
         if not self.dataagent_id:
-            raise ValueError(
-                "FABRIC_DATAAGENT_ID environment variable is required."
-            )
+            raise ValueError("FABRIC_DATAAGENT_ID environment variable is required.")
 
         self._credential = DefaultAzureCredential()
 
@@ -92,11 +94,12 @@ class FabricClient:
         self._token: Optional[str] = None
         self._token_expires_on: float = 0.0
 
-        # Per-user conversation history: {user_id: [{"role": ..., "content": ...}]}
-        self._histories: Dict[str, List[Dict[str, str]]] = {}
+        # Per-user conversation IDs (server-side history via conversationId)
+        # {user_id: conversationId}
+        self._conversation_ids: Dict[str, str] = {}
 
         logger.info(
-            "FabricClient initialized (workspace=%s, agent=%s, agent_name=%s)",
+            "FabricClient initialized  workspace=%s  agent_id=%s  agent_name=%s",
             self.workspace_id,
             self.dataagent_id,
             self.dataagent_name,
@@ -113,7 +116,7 @@ class FabricClient:
         token_resp = self._credential.get_token(FABRIC_SCOPE)
         self._token = token_resp.token
         self._token_expires_on = float(token_resp.expires_on)
-        logger.debug("Acquired new Fabric token (expires_on=%s)", token_resp.expires_on)
+        logger.debug("Fabric token refreshed (expires_on=%s)", token_resp.expires_on)
         return self._token
 
     def _headers(self) -> Dict[str, str]:
@@ -122,100 +125,160 @@ class FabricClient:
             "Content-Type": "application/json",
         }
 
-    # ─── API endpoint ────────────────────────────────────────────────────────
+    # ─── Endpoints ──────────────────────────────────────────────────────────
 
-    def _query_url(self) -> str:
+    def _primary_url(self) -> str:
+        """Fabric Data Agent native query endpoint (preferred)."""
         return (
             f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
             f"/dataAgents/{self.dataagent_id}/query"
+        )
+
+    def _openai_compat_url(self) -> str:
+        """
+        OpenAI-compatible chat completion endpoint.
+        'aiskills' is the legacy item-type path; 'dataAgents' is the new path.
+        Try both so the client works regardless of how the agent was created.
+        """
+        return (
+            f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
+            f"/aiskills/{self.dataagent_id}/aiassistant/openai"
         )
 
     # ─── Auto-discovery ──────────────────────────────────────────────────────
 
     def _discover_agent_id(self) -> Optional[str]:
         """
-        Scan the workspace for a Data Agent whose displayName matches
-        self.dataagent_name.  Called automatically when the stored
-        FABRIC_DATAAGENT_ID returns 404, so the backend self-heals after
-        a re-deploy recreated the agent with a new GUID.
+        Search the workspace for a Data Agent whose displayName matches
+        self.dataagent_name.  Called when the stored ID returns 404.
 
-        Tries two endpoints:
-          1. GET /workspaces/{id}/dataAgents        (dedicated Data Agent API)
-          2. GET /workspaces/{id}/items?type=DataAgent  (generic Items API fallback,
-             used when the agent was created via the Items API path)
+        Tries:
+          1. GET /workspaces/{id}/dataAgents        (Data Agent API)
+          2. GET /workspaces/{id}/items?type=DataAgent  (Items API fallback)
 
         Returns the discovered agent ID, or None if not found.
         """
         target = self.dataagent_name.lower()
 
-        # --- Path 1: dedicated /dataAgents endpoint ---
-        try:
-            list_url = (
-                f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}/dataAgents"
-            )
-            resp = requests.get(list_url, headers=self._headers(), timeout=30)
-            if resp.ok:
-                agents = resp.json().get("value", [])
-                for agent in agents:
-                    if agent.get("displayName", "").lower() == target:
-                        discovered_id: str = agent["id"]
-                        logger.info(
-                            "Agent discovery (/dataAgents): found '%s' with ID %s (was %s)",
-                            self.dataagent_name,
-                            discovered_id,
-                            self.dataagent_id,
-                        )
-                        return discovered_id
-                logger.warning(
-                    "Agent discovery (/dataAgents): '%s' not in workspace %s "
-                    "(%d agents listed) - trying /items fallback",
-                    self.dataagent_name,
-                    self.workspace_id,
-                    len(agents),
+        for path, key in [
+            (f"/workspaces/{self.workspace_id}/dataAgents", "value"),
+            (f"/workspaces/{self.workspace_id}/items?type=DataAgent", "value"),
+        ]:
+            try:
+                resp = requests.get(
+                    f"{FABRIC_BASE_URL}{path}",
+                    headers=self._headers(),
+                    timeout=30,
                 )
-            else:
-                logger.warning(
-                    "Agent discovery: GET /dataAgents returned %d - trying /items fallback",
-                    resp.status_code,
-                )
-        except Exception as exc:
-            logger.warning("Agent discovery /dataAgents failed (non-fatal): %s", exc)
-
-        # --- Path 2: generic /items?type=DataAgent endpoint ---
-        try:
-            items_url = (
-                f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
-                f"/items?type=DataAgent"
-            )
-            resp2 = requests.get(items_url, headers=self._headers(), timeout=30)
-            if resp2.ok:
-                items = resp2.json().get("value", [])
-                for item in items:
-                    if item.get("displayName", "").lower() == target:
-                        discovered_id = item["id"]
-                        logger.info(
-                            "Agent discovery (/items): found '%s' with ID %s (was %s)",
-                            self.dataagent_name,
-                            discovered_id,
-                            self.dataagent_id,
-                        )
-                        return discovered_id
-                logger.warning(
-                    "Agent discovery (/items): no DataAgent named '%s' in workspace %s "
-                    "(%d items listed)",
-                    self.dataagent_name,
-                    self.workspace_id,
-                    len(items),
-                )
-            else:
-                logger.warning(
-                    "Agent discovery: GET /items?type=DataAgent returned %d",
-                    resp2.status_code,
-                )
-        except Exception as exc:
-            logger.warning("Agent discovery /items failed (non-fatal): %s", exc)
+                if resp.ok:
+                    items = resp.json().get(key, []) or []
+                    for item in items:
+                        if item.get("displayName", "").lower() == target:
+                            discovered: str = item["id"]
+                            logger.info(
+                                "Auto-discovery via %s: found '%s' (ID: %s, was: %s)",
+                                path, self.dataagent_name, discovered, self.dataagent_id,
+                            )
+                            return discovered
+                    logger.warning(
+                        "Auto-discovery via %s: agent '%s' not found (%d items listed). "
+                        "Ensure the App Service Managed Identity is a Fabric workspace member.",
+                        path, self.dataagent_name, len(items),
+                    )
+                else:
+                    logger.warning(
+                        "Auto-discovery GET %s returned HTTP %d: %s",
+                        path, resp.status_code, resp.text[:200],
+                    )
+            except Exception as exc:
+                logger.warning("Auto-discovery %s failed (non-fatal): %s", path, exc)
 
         return None
+
+    # ─── Helper: call primary endpoint ──────────────────────────────────────
+
+    def _call_primary(
+        self, message: str, conversation_id: Optional[str]
+    ) -> requests.Response:
+        """POST to the native Data Agent /query endpoint."""
+        payload: Dict[str, Any] = {"userMessage": message}
+        if conversation_id:
+            payload["conversationId"] = conversation_id
+
+        logger.debug(
+            "POST %s  conversationId=%s  message=%.80s",
+            self._primary_url(), conversation_id, message,
+        )
+        return requests.post(
+            self._primary_url(),
+            headers=self._headers(),
+            json=payload,
+            timeout=120,
+        )
+
+    # ─── Helper: call OpenAI-compatible fallback endpoint ───────────────────
+
+    def _call_openai_compat(
+        self, message: str, conversation_id: Optional[str]
+    ) -> Optional[requests.Response]:
+        """
+        POST to the OpenAI-compatible /aiskills/.../aiassistant/openai endpoint.
+        Returns the response, or None if the endpoint is not found (404).
+        """
+        # Build messages: if we have a conversationId we can't reconstruct history,
+        # so just send the current question (the server holds context).
+        payload: Dict[str, Any] = {
+            "messages": [{"role": "user", "content": message}],
+        }
+        url = self._openai_compat_url()
+        logger.debug("POST (openai-compat fallback) %s", url)
+        try:
+            resp = requests.post(
+                url,
+                headers=self._headers(),
+                json=payload,
+                timeout=120,
+            )
+            return resp
+        except Exception as exc:
+            logger.warning("OpenAI-compat fallback exception: %s", exc)
+            return None
+
+    # ─── Extract answer from various response shapes ─────────────────────────
+
+    @staticmethod
+    def _extract_answer(data: Dict[str, Any]) -> str:
+        """
+        Pull the text answer from the Fabric Data Agent response.
+
+        Known response shapes:
+          Native endpoint:
+            {"response": "...", "conversationId": "...", "type": "answer"}
+          OpenAI-compatible endpoint:
+            {"choices": [{"message": {"role": "assistant", "content": "..."}}]}
+          Legacy / preview variations:
+            {"answer": "..."}, {"message": "..."}, {"text": "..."}
+        """
+        # Native endpoint field
+        native = data.get("response")
+        if native:
+            return str(native)
+
+        # OpenAI chat-completion format
+        choices = data.get("choices") or []
+        if choices:
+            msg = choices[0].get("message", {})
+            content = msg.get("content") or ""
+            if content:
+                return str(content)
+
+        # Legacy / other preview field names
+        for key in ("answer", "message", "text", "output", "result"):
+            val = data.get(key)
+            if val and isinstance(val, str):
+                return val
+
+        return ""
 
     # ─── Public chat method ──────────────────────────────────────────────────
 
@@ -229,139 +292,158 @@ class FabricClient:
                 "metadata":  dict
             }
 
-        Raises RuntimeError if the Fabric API returns a non-2xx status.
+        Raises RuntimeError if the Fabric API returns a non-2xx status that
+        cannot be recovered from.
         """
-        history = self._histories.get(user_id, [])
-
-        payload: Dict[str, Any] = {
-            "userMessage": message,
-            "history": history,
-        }
+        conversation_id = self._conversation_ids.get(user_id)
 
         logger.info(
-            "Fabric Data Agent query  user=%s  message=%.80s",
-            user_id,
-            message,
+            "Fabric Data Agent query  user=%s  agent=%s  workspace=%s  "
+            "conversationId=%s  message=%.80s",
+            user_id, self.dataagent_id, self.workspace_id,
+            conversation_id, message,
         )
 
-        resp = None
-        for _attempt in range(1, _AGENT_NOT_READY_RETRIES + 1):
-            resp = requests.post(
-                self._query_url(),
-                headers=self._headers(),
-                json=payload,
-                timeout=120,
-            )
+        resp: Optional[requests.Response] = None
+        used_endpoint = "primary"
+
+        # ── Attempt 1: primary endpoint with current agent ID ────────────────
+        for attempt in range(1, _QUERY_MAX_RETRIES + 1):
+            resp = self._call_primary(message, conversation_id)
+
             if resp.ok:
                 break
 
-            # On auth errors, clear the cached token so the next call retries
+            # Clear cached token on auth errors
             if resp.status_code in (401, 403):
                 self._token = None
+                logger.warning(
+                    "Auth error %d on Fabric API — token cleared. "
+                    "Ensure the App Service Managed Identity is added to the "
+                    "Fabric workspace (Contributor role). "
+                    "workspace=%s  agent=%s",
+                    resp.status_code, self.workspace_id, self.dataagent_id,
+                )
 
-            # Retry on 404 EntityNotFound:
-            #   - If this is an early attempt, the agent may just need warm-up
-            #     time after a fresh deploy — wait and retry.
-            #   - After all warm-up retries, attempt auto-discovery: search the
-            #     workspace for an agent named self.dataagent_name. If found,
-            #     update self.dataagent_id and retry once with the new ID.
-            #     This self-heals the backend when a re-deploy created a new
-            #     agent GUID without restarting the App Service.
             if resp.status_code == 404:
                 try:
-                    error_code = resp.json().get("errorCode", "")
+                    err_code = resp.json().get("errorCode", "")
                 except Exception:
-                    error_code = ""
+                    err_code = ""
 
-                if error_code == "EntityNotFound":
-                    if _attempt < _AGENT_NOT_READY_RETRIES:
+                if err_code == "EntityNotFound":
+                    if attempt < _QUERY_MAX_RETRIES:
                         logger.warning(
-                            "Data Agent not ready yet (attempt %d/%d) - retrying in %ds",
-                            _attempt,
-                            _AGENT_NOT_READY_RETRIES,
-                            _AGENT_NOT_READY_WAIT,
+                            "EntityNotFound on attempt %d/%d — agent may be warming up. "
+                            "Retrying in %ds.  agent_id=%s",
+                            attempt, _QUERY_MAX_RETRIES, _QUERY_RETRY_WAIT,
+                            self.dataagent_id,
                         )
-                        time.sleep(_AGENT_NOT_READY_WAIT)
+                        time.sleep(_QUERY_RETRY_WAIT)
                         continue
 
-                    # Warm-up retries exhausted — try auto-discovery
+                    # Exhausted warm-up retries — try auto-discovery
                     logger.warning(
                         "Stored agent ID '%s' returned 404 after %d retries. "
                         "Attempting auto-discovery by name '%s'...",
-                        self.dataagent_id,
-                        _AGENT_NOT_READY_RETRIES,
-                        self.dataagent_name,
+                        self.dataagent_id, _QUERY_MAX_RETRIES, self.dataagent_name,
                     )
                     discovered = self._discover_agent_id()
                     if discovered and discovered != self.dataagent_id:
-                        self.dataagent_id = discovered
-                        # Retry once with the discovered ID
-                        resp = requests.post(
-                            self._query_url(),
-                            headers=self._headers(),
-                            json=payload,
-                            timeout=120,
+                        logger.info(
+                            "Auto-discovery succeeded: new agent ID = %s", discovered
                         )
+                        self.dataagent_id = discovered
+                        # Reset conversationId — new agent won't know old context
+                        self._conversation_ids.pop(user_id, None)
+                        conversation_id = None
+                        resp = self._call_primary(message, conversation_id)
                         if resp.ok:
                             break
                         logger.error(
-                            "Discovered agent ID %s also returned %d",
-                            discovered,
-                            resp.status_code,
+                            "Discovered agent ID %s also returned %d: %s",
+                            discovered, resp.status_code, resp.text[:300],
                         )
 
-            # Any other non-2xx (or unrecoverable 404) — surface the error
-            error_detail = resp.text[:400]
-            logger.error(
-                "Fabric Data Agent API error [%d]: %s",
-                resp.status_code,
-                error_detail,
+            # Non-recoverable on this attempt — break and try fallback
+            break
+
+        # ── Attempt 2: OpenAI-compatible fallback endpoint ───────────────────
+        if not resp or not resp.ok:
+            logger.info(
+                "Primary endpoint failed (HTTP %s) — trying OpenAI-compat fallback",
+                resp.status_code if resp else "N/A",
             )
-            if resp.status_code == 404:
+            fallback = self._call_openai_compat(message, conversation_id)
+            if fallback and fallback.ok:
+                resp = fallback
+                used_endpoint = "openai-compat"
+            elif fallback:
+                logger.warning(
+                    "OpenAI-compat fallback also failed HTTP %d: %s",
+                    fallback.status_code, fallback.text[:300],
+                )
+
+        # ── Raise if still not ok ─────────────────────────────────────────────
+        if not resp or not resp.ok:
+            status = resp.status_code if resp else 0
+            detail = resp.text[:400] if resp else "no response"
+
+            # Build a helpful, actionable error message
+            if status == 404:
                 raise RuntimeError(
                     f"Fabric Data Agent returned HTTP 404 (EntityNotFound). "
-                    f"Auto-discovery for '{self.dataagent_name}' also failed. "
-                    f"Go to https://app.fabric.microsoft.com, open the workspace, "
-                    f"confirm '{self.dataagent_name}' exists, then re-run the "
-                    f"deploy workflow to refresh FABRIC_DATAAGENT_ID."
+                    f"Most likely cause: the App Service Managed Identity is NOT a "
+                    f"member of the Fabric workspace '{self.workspace_id}'.\n"
+                    f"Fix: re-run the deploy workflow — it will call fabric_setup.py "
+                    f"--app_service_principal_id to add the MI automatically.\n"
+                    f"Or add it manually: Fabric portal -> Workspace -> Manage access "
+                    f"-> Add the App Service identity as Contributor.\n"
+                    f"(workspace={self.workspace_id}, agent={self.dataagent_id}, "
+                    f"agent_name={self.dataagent_name})"
+                )
+            if status in (401, 403):
+                raise RuntimeError(
+                    f"Fabric Data Agent returned HTTP {status} (auth error). "
+                    f"The App Service Managed Identity does not have access. "
+                    f"Ensure it is a Fabric workspace Contributor. "
+                    f"(workspace={self.workspace_id})"
                 )
             raise RuntimeError(
-                f"Fabric Data Agent returned HTTP {resp.status_code}: {error_detail}"
+                f"Fabric Data Agent returned HTTP {status}: {detail}"
             )
 
+        # ── Parse response ────────────────────────────────────────────────────
         data = resp.json()
-        logger.debug("Fabric API response keys: %s", list(data.keys()))
-
-        # ── Extract answer (handle preview API field-name variations) ────────
-        answer: str = (
-            data.get("answer")
-            or data.get("response")
-            or data.get("message")
-            or data.get("text")
-            or ""
+        logger.debug(
+            "Fabric API response  endpoint=%s  keys=%s", used_endpoint, list(data.keys())
         )
 
-        # ── Update stored conversation history ───────────────────────────────
-        returned_history = data.get("history") or data.get("conversationHistory")
-        if returned_history is not None:
-            # API returned updated history — use it directly
-            self._histories[user_id] = returned_history
-        else:
-            # API did not return history — build it manually
-            updated = list(history)
-            updated.append({"role": "user", "content": message})
-            if answer:
-                updated.append({"role": "assistant", "content": answer})
-            self._histories[user_id] = updated
+        answer = self._extract_answer(data)
+
+        # Update conversationId for next turn (only from native endpoint)
+        if used_endpoint == "primary":
+            new_conv_id = data.get("conversationId") or data.get("sessionId")
+            if new_conv_id:
+                self._conversation_ids[user_id] = str(new_conv_id)
+            elif user_id in self._conversation_ids:
+                # Keep existing conversationId if API didn't return a new one
+                pass
 
         timestamp = datetime.now(tz=timezone.utc).isoformat()
 
         return {
-            "answer": answer or "No response received.",
+            "answer": answer or "No response received from the Data Agent.",
             "timestamp": timestamp,
             "metadata": {
                 "workspace_id": self.workspace_id,
                 "dataagent_id": self.dataagent_id,
                 "source": "fabric_data_agent",
+                "endpoint": used_endpoint,
             },
         }
+
+    def reset_conversation(self, user_id: str) -> None:
+        """Clear the stored conversationId so the next message starts fresh."""
+        self._conversation_ids.pop(user_id, None)
+        logger.info("Conversation reset for user %s", user_id)

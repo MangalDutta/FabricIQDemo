@@ -202,6 +202,76 @@ def _assign_capacity(ws_id: str, capacity_id: str, token: str) -> None:
         print(f"   ⚠️  Capacity assignment failed (non-fatal): {exc}")
 
 
+def add_workspace_member(
+    workspace_id: str,
+    principal_id: str,
+    token: str,
+    role: str = "Contributor",
+) -> None:
+    """
+    Adds a service principal to the Fabric workspace via
+    POST /v1/workspaces/{workspaceId}/roleAssignments
+
+    This is CRITICAL: the App Service Managed Identity (MI) must be a
+    workspace member for the Fabric Data Agent query API to return data.
+    Without workspace membership, Fabric returns HTTP 404 EntityNotFound
+    on ALL resource requests from that MI (not 401/403 -- it hides resources
+    from non-members as a security measure).
+
+    Silently succeeds if the principal is already a member (400 errorCode
+    PrincipalAlreadyExists is treated as success).
+    """
+    if not principal_id:
+        print("   ⚠️  No principal_id provided -- skipping workspace member assignment")
+        return
+
+    print(f"   Adding service principal '{principal_id}' to workspace as {role}...")
+    payload = {
+        "principal": {
+            "id": principal_id,
+            "type": "ServicePrincipal",
+        },
+        "role": role,
+    }
+    try:
+        resp = requests.post(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/roleAssignments",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code in (200, 201):
+            print(f"   ✓ Service principal added to workspace as {role}.")
+            return
+        if resp.status_code == 400:
+            try:
+                body = resp.json()
+                err_code = body.get("errorCode", "")
+                err_msg = body.get("message", "")
+            except Exception:
+                err_code, err_msg = "", ""
+            if "AlreadyExists" in err_code or "already" in err_msg.lower():
+                print(f"   ✓ Service principal is already a workspace member ({err_code or 'OK'}).")
+                return
+            print(f"   ⚠️  roleAssignments returned 400: {err_code} – {err_msg[:200]}")
+            return
+        print(
+            f"   ⚠️  roleAssignments returned HTTP {resp.status_code}: {resp.text[:300]} "
+            "(non-fatal — you may need to add the App Service managed identity to the "
+            "Fabric workspace manually in the Fabric portal.)"
+        )
+    except Exception as exc:
+        print(
+            f"   ⚠️  add_workspace_member failed (non-fatal): {exc}\n"
+            "   Grant the App Service managed identity access manually:\n"
+            f"   Fabric portal -> Workspace '{workspace_id}' -> Manage access -> "
+            f"Add '{principal_id}' as Contributor."
+        )
+
+
 def get_or_create_workspace(
     workspace_name: str,
     capacity_id: Optional[str],
@@ -1301,6 +1371,18 @@ def main(argv=None) -> None:
         default="Customer360 Report",
         help="Display name for the Power BI report to create",
     )
+    parser.add_argument(
+        "--app_service_principal_id",
+        required=False,
+        default="",
+        help=(
+            "Object ID (principal ID) of the App Service's System-Assigned Managed Identity. "
+            "When set, this principal is added to the Fabric workspace as Contributor so the "
+            "backend can call the Fabric Data Agent query API. "
+            "Get it via: az webapp identity show --name <app> --resource-group <rg> "
+            "--query principalId -o tsv"
+        ),
+    )
 
     args = parser.parse_args(argv)
 
@@ -1328,6 +1410,28 @@ def main(argv=None) -> None:
         workspace_id = get_or_create_workspace(
             args.workspace_name, args.capacity_id, fabric_token
         )
+
+        # ── 2a. Grant App Service MI workspace access ──────────────────────
+        # The backend App Service uses its System-Assigned Managed Identity to
+        # call the Fabric Data Agent query API.  Without workspace membership
+        # the MI gets HTTP 404 EntityNotFound on all Fabric resource requests
+        # (Fabric hides resources from non-members as a security measure).
+        if args.app_service_principal_id:
+            print(f"\n🔐 Step 2a: Granting App Service MI access to workspace")
+            add_workspace_member(
+                workspace_id,
+                args.app_service_principal_id,
+                fabric_token,
+                role="Contributor",
+            )
+        else:
+            print(
+                "\n⚠️  Step 2a: --app_service_principal_id not provided.\n"
+                "   The App Service Managed Identity may not have access to the Fabric\n"
+                "   workspace, causing HTTP 404 errors when the backend queries the Data Agent.\n"
+                "   To fix, re-run with --app_service_principal_id <MI-object-id>, or add\n"
+                "   the MI manually via: Fabric portal -> Workspace -> Manage access."
+            )
 
         # ── 3. Lakehouse ──────────────────────────────────────────────────
         print("\n🏗️  Step 3: Lakehouse")
