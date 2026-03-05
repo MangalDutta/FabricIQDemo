@@ -64,7 +64,7 @@ async def reset_conversation(request: Request) -> Dict[str, str]:
         body = await request.json()
         user_id = body.get("userId", "anonymous")
         fabric_client.reset_conversation(user_id=user_id)
-        logger.info(f"Conversation reset for {user_id}")
+        logger.info("Conversation reset for user_id=%s", user_id[:64])
         return {"status": "ok", "message": "Conversation reset"}
     except HTTPException:
         raise

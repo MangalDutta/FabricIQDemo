@@ -50,8 +50,8 @@ const App: React.FC = () => {
   const resetConversation = async () => {
     try {
       await axios.post(`${BACKEND_URL}/api/reset`, { userId: 'web-user' });
-    } catch {
-      // Reset is best-effort; clear local state regardless
+    } catch (err) {
+      console.warn('Reset request failed (clearing local state anyway):', err);
     }
     setMessages([]);
     setInput('');
