@@ -905,11 +905,79 @@ def configure_dataagent(
     This is the step that makes the agent aware of *which* data it should query.
     Without this step the agent has no data source and will return empty answers.
 
-    Tries several HTTP methods (PATCH then PUT) and payload shapes to handle
-    differences across Fabric API preview versions.  PATCH is tried first as
-    some Fabric regions return HTTP 404 for PUT on the dataAgents endpoint.
+    IMPORTANT: In Fabric preview, PATCH/PUT on a Published agent moves it back
+    to Draft state.  The publish endpoint (/publish, /activate) currently returns
+    HTTP 404, so there is no API way to re-publish after a PATCH.  Therefore this
+    function SKIPS the PATCH if the agent already has the Lakehouse as a data
+    source and is in Published (or unknown) state.  Only agents that are clearly
+    mis-configured (no data source) are patched.
+
+    Tries PATCH first, then PUT to handle differences across preview versions.
     """
     print(f"   Configuring Data Agent '{agent_name}' → Lakehouse '{lakehouse_id}' / table '{table_name}'...")
+
+    agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
+    req_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    # ── Step 0: GET the current agent state and configuration ─────────────────
+    # If the agent is already Published AND the correct Lakehouse is already a
+    # data source, skip the PATCH entirely.  Patching a Published agent moves it
+    # to Draft state, and the publish endpoint is not yet available in this
+    # preview API version.
+    try:
+        get_resp = requests.get(agent_url, headers=req_headers, timeout=30)
+        if get_resp.ok:
+            current = get_resp.json()
+            # Fabric may use "state", "status", or "publishState" depending on
+            # the preview version.  Treat any truthy value other than
+            # "Draft"/"Unpublished"/"Inactive" as Published.
+            raw_state = (
+                current.get("state")
+                or current.get("status")
+                or current.get("publishState")
+                or ""
+            )
+            state = str(raw_state).lower()
+            is_draft = state in ("draft", "unpublished", "inactive", "creating")
+            config = current.get("configuration") or {}
+            data_sources = config.get("dataSources") or []
+            already_linked = any(
+                str(ds.get("itemId", "")).lower() == lakehouse_id.lower()
+                for ds in data_sources
+            )
+            print(
+                f"   Agent current state: '{raw_state or 'unknown'}', "
+                f"data sources: {len(data_sources)}, "
+                f"lakehouse already linked: {already_linked}"
+            )
+            if already_linked and not is_draft:
+                print(
+                    "   ✓ Agent is published and Lakehouse is already configured — "
+                    "skipping PATCH to avoid Draft-state regression."
+                )
+                return
+            if already_linked and is_draft:
+                print(
+                    "   Agent is in Draft state with Lakehouse already linked — "
+                    "will attempt to publish without re-patching."
+                )
+                # Skip to publish-only attempt below
+                _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
+                return
+            print(
+                f"   Lakehouse not yet linked (or agent mis-configured) — "
+                f"will PATCH configuration."
+            )
+        else:
+            print(
+                f"   [WARN] GET agent returned HTTP {get_resp.status_code} — "
+                f"proceeding with configure anyway."
+            )
+    except Exception as exc:
+        print(f"   [WARN] GET agent for state check failed (non-fatal): {exc}")
 
     # Build data source with table selection (try progressively simpler payloads).
     # objectType:"Table" is required by some Fabric preview API versions.
@@ -959,12 +1027,6 @@ def configure_dataagent(
         },
     ]
 
-    agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
-    req_headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-
     last_err = ""
     attempt = 0
     # Try PATCH first (partial update), then PUT (full replace) for each payload.
@@ -985,6 +1047,9 @@ def configure_dataagent(
                 )
                 if resp.status_code in (200, 201, 204):
                     print(f"   OK  Data Agent configured successfully (HTTP {resp.status_code}).")
+                    # After a successful PATCH/PUT the agent may be in Draft state.
+                    # Attempt to publish immediately so the /query endpoint is reachable.
+                    _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
                     return
                 if resp.status_code == 202:
                     # Long-running — poll if we have an operation ID
@@ -1019,6 +1084,53 @@ def configure_dataagent(
 
 
 # ─── Fabric Data Agent – publish / activate ───────────────────────────────────
+
+
+def _try_publish_dataagent(
+    workspace_id: str,
+    agent_id: str,
+    agent_name: str,
+    token: str,
+) -> bool:
+    """
+    Internal helper: attempts to publish the Data Agent via known endpoints.
+    Returns True if any endpoint returned a success status, False otherwise.
+    Non-fatal — callers should continue even on failure.
+    """
+    req_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    publish_endpoints = [
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/publish",
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/activate",
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items/{agent_id}/publish",
+    ]
+    for url in publish_endpoints:
+        try:
+            resp = requests.post(url, headers=req_headers, json={}, timeout=60)
+            if resp.status_code in (200, 201, 204):
+                print(f"   ✓ Agent published via {url.split('/')[-1]} (HTTP {resp.status_code}).")
+                return True
+            if resp.status_code == 202:
+                op_id = (
+                    resp.headers.get("x-ms-operation-id")
+                    or resp.headers.get("x-ms-operationid")
+                )
+                if op_id:
+                    try:
+                        poll_operation(op_id, token, "data agent publish")
+                    except Exception:
+                        pass
+                print(f"   ✓ Agent publish accepted (202) via {url.split('/')[-1]}.")
+                return True
+            if resp.status_code == 409:
+                print(f"   Agent already published (409 Conflict) — treating as success.")
+                return True
+        except Exception as exc:
+            print(f"   [WARN] Publish via {url.split('/')[-1]} exception: {exc}")
+    return False
+
 
 def publish_dataagent(
     workspace_id: str,

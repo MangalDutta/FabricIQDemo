@@ -322,6 +322,45 @@ class FabricClient:
         resp: Optional[requests.Response] = None
         used_endpoint = "primary"
 
+        # ── Pre-flight: verify agent state via GET ────────────────────────────────
+        # Log the agent state before querying so failures are easier to diagnose.
+        # A Fabric Data Agent in Draft state returns 404 on /query even when the
+        # workspace Managed Identity is a Contributor.
+        try:
+            agent_check = requests.get(
+                f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
+                f"/dataAgents/{self.dataagent_id}",
+                headers=self._headers(),
+                timeout=20,
+            )
+            if agent_check.ok:
+                agent_data = agent_check.json()
+                raw_state = (
+                    agent_data.get("state")
+                    or agent_data.get("status")
+                    or agent_data.get("publishState")
+                    or "unknown"
+                )
+                logger.info(
+                    "Agent pre-flight: '%s' state=%s",
+                    self.dataagent_id, raw_state,
+                )
+                # If agent is in Draft state, log a specific warning
+                if str(raw_state).lower() in ("draft", "unpublished", "inactive"):
+                    logger.warning(
+                        "Agent '%s' is in '%s' state — queries will return 404. "
+                        "Open the Fabric portal and click 'Publish' on the agent: "
+                        "https://app.fabric.microsoft.com/groups/%s",
+                        self.dataagent_id, raw_state, self.workspace_id,
+                    )
+            else:
+                logger.warning(
+                    "Agent pre-flight GET returned HTTP %d: %s",
+                    agent_check.status_code, agent_check.text[:200],
+                )
+        except Exception as pre_exc:
+            logger.debug("Agent pre-flight check failed (non-fatal): %s", pre_exc)
+
         # ── Attempt 1: primary endpoint with current agent ID ────────────────
         for attempt in range(1, _QUERY_MAX_RETRIES + 1):
             resp = self._call_primary(message, conversation_id, history)
@@ -426,13 +465,15 @@ class FabricClient:
             # Build a helpful, actionable error message
             if status == 404:
                 raise RuntimeError(
-                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound). "
-                    f"Most likely cause: the App Service Managed Identity is NOT a "
-                    f"member of the Fabric workspace '{self.workspace_id}'.\n"
-                    f"Fix: re-run the deploy workflow — it will call fabric_setup.py "
-                    f"--app_service_principal_id to add the MI automatically.\n"
-                    f"Or add it manually: Fabric portal -> Workspace -> Manage access "
-                    f"-> Add the App Service identity as Contributor.\n"
+                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound).\n"
+                    f"Fabric error detail: {detail}\n"
+                    f"Two most common causes:\n"
+                    f"  1. Agent is in DRAFT state (not Published). Open the Fabric portal, "
+                    f"open the agent, and click 'Publish':\n"
+                    f"     https://app.fabric.microsoft.com/groups/{self.workspace_id}\n"
+                    f"  2. The App Service Managed Identity is not a workspace member. "
+                    f"Re-run the deploy workflow to add it, or add manually:\n"
+                    f"     Fabric portal -> Workspace -> Manage access -> Add as Contributor.\n"
                     f"(workspace={self.workspace_id}, agent={self.dataagent_id}, "
                     f"agent_name={self.dataagent_name})"
                 )
