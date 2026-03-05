@@ -54,6 +54,25 @@ async def config() -> Dict[str, str]:
         "powerbi_report_url": os.environ.get("POWERBI_REPORT_URL", ""),
     }
 
+@app.post("/api/reset")
+async def reset_conversation(request: Request) -> Dict[str, str]:
+    """Reset the conversation history for a user so the next message starts fresh."""
+    if not fabric_client:
+        raise HTTPException(status_code=503, detail="Fabric client not configured")
+
+    try:
+        body = await request.json()
+        user_id = body.get("userId", "anonymous")
+        fabric_client.reset_conversation(user_id=user_id)
+        logger.info(f"Conversation reset for {user_id}")
+        return {"status": "ok", "message": "Conversation reset"}
+    except HTTPException:
+        raise
+    except Exception as ex:
+        logger.exception(f"Reset error: {ex}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(ex)}")
+
+
 @app.post("/api/chat")
 async def chat(request: Request) -> Dict[str, Any]:
     if not fabric_client:

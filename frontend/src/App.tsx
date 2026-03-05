@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -14,6 +14,7 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   // Power BI URL: fetched from the backend at runtime so it can be updated
   // via an App Service setting without rebuilding the Docker image.
   // Falls back to the build-time env var for local development.
@@ -41,6 +42,20 @@ const App: React.FC = () => {
     'Count customers by Segment',
     'List Startup customers in Delhi with LifetimeValue above 50000'
   ];
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, loading]);
+
+  const resetConversation = async () => {
+    try {
+      await axios.post(`${BACKEND_URL}/api/reset`, { userId: 'web-user' });
+    } catch {
+      // Reset is best-effort; clear local state regardless
+    }
+    setMessages([]);
+    setInput('');
+  };
 
   const sendMessage = async () => {
     if (!input.trim()) return;
@@ -95,8 +110,17 @@ const App: React.FC = () => {
     <div className="app-container">
       <div className="chat-panel">
         <div className="chat-header">
-          <h1>🤖 Customer 360 AI Analytics</h1>
-          <p>Ask questions about your customer data</p>
+          <div className="chat-header-content">
+            <div>
+              <h1>🤖 Customer 360 AI Analytics</h1>
+              <p>Ask questions about your customer data</p>
+            </div>
+            {messages.length > 0 && (
+              <button className="new-chat-btn" onClick={resetConversation}>
+                🔄 New Chat
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="messages-container">
@@ -146,6 +170,8 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
+
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="input-container">

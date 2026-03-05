@@ -245,6 +245,46 @@ class TestChatEndpointErrorPaths:
         assert resp.status_code == 500
 
 
+# ─── Reset endpoint tests ─────────────────────────────────────────────────────
+
+class TestResetEndpoint:
+    def test_reset_returns_200(self, test_client_with_fabric):
+        resp = test_client_with_fabric.post(
+            "/api/reset", json={"userId": "web-user"}
+        )
+        assert resp.status_code == 200
+
+    def test_reset_response_body(self, test_client_with_fabric):
+        resp = test_client_with_fabric.post(
+            "/api/reset", json={"userId": "web-user"}
+        )
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert "reset" in data["message"].lower()
+
+    def test_reset_defaults_user_id(self, test_client_with_fabric):
+        """When no userId is provided, it defaults to 'anonymous'."""
+        resp = test_client_with_fabric.post("/api/reset", json={})
+        assert resp.status_code == 200
+
+    def test_reset_503_when_fabric_not_configured(self, test_client_no_fabric):
+        """When FabricClient failed to init, /api/reset must return 503."""
+        resp = test_client_no_fabric.post(
+            "/api/reset", json={"userId": "test"}
+        )
+        assert resp.status_code == 503
+
+    def test_reset_calls_fabric_client(self, test_client_with_fabric):
+        """Ensures reset_conversation is called on the FabricClient."""
+        import app as app_module
+        importlib.reload(app_module)
+        mock_fc = _make_mock_fabric_client()
+        app_module.fabric_client = mock_fc
+        client = TestClient(app_module.app)
+        client.post("/api/reset", json={"userId": "user-42"})
+        mock_fc.reset_conversation.assert_called_once()
+
+
 # ─── CORS header tests ────────────────────────────────────────────────────────
 
 class TestCORSHeaders:

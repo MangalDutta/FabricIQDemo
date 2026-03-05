@@ -447,6 +447,20 @@ jobs:
             az webapp restart --resource-group "$RG" --name "$FE"
             echo "Frontend configured and restarted"
 
+      # --- Smoke Test (optional - runs against deployed apps) ---
+      - name: Post-Deployment Smoke Test
+        continue-on-error: true
+        run: |
+          echo "Running smoke test against deployed apps..."
+          BE_URL="https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
+          FE_URL="https://${{ steps.outputs.outputs.frontend_app }}.azurewebsites.net"
+
+          python scripts/smoke_test.py \
+            --backend "$BE_URL" \
+            --frontend "$FE_URL" \
+            --wait-for-warmup 30 \
+            --timeout 60 || echo "Smoke test had failures (non-blocking)"
+
       # --- Deployment Summary ---
       - name: Deployment Summary
         run: |
