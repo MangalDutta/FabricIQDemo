@@ -202,6 +202,78 @@ def _assign_capacity(ws_id: str, capacity_id: str, token: str) -> None:
         print(f"   ⚠️  Capacity assignment failed (non-fatal): {exc}")
 
 
+def ensure_capacity_active(capacity_id: str, token: str) -> bool:
+    """
+    Checks the Fabric capacity state via GET /v1/capacities.
+    If Paused, resumes it and polls until Active (up to 4 min).
+    Returns True if the capacity is (or becomes) Active, False otherwise.
+    """
+    if not capacity_id:
+        return False
+    try:
+        resp = requests.get(
+            f"{FABRIC_BASE_URL}/capacities",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if not resp.ok:
+            print(f"   [WARN] GET /capacities returned HTTP {resp.status_code} - cannot verify capacity state")
+            return False
+
+        target = None
+        for cap in resp.json().get("value", []) or []:
+            if cap.get("id", "").lower() == capacity_id.lower():
+                target = cap
+                break
+
+        if not target:
+            print(f"   [WARN] Capacity {capacity_id} not found in /capacities listing")
+            return False
+
+        state = target.get("state", "Unknown")
+        display_name = target.get("displayName", capacity_id)
+        print(f"   Capacity '{display_name}' (ID: {capacity_id}) state: {state}")
+
+        if state == "Active":
+            return True
+
+        if state == "Paused":
+            print(f"   Resuming paused capacity '{display_name}'...")
+            resume_resp = requests.post(
+                f"{FABRIC_BASE_URL}/capacities/{capacity_id}/resume",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                timeout=60,
+            )
+            if not resume_resp.ok:
+                print(f"   [WARN] Resume returned HTTP {resume_resp.status_code}: {resume_resp.text[:200]}")
+                return False
+            print("   Polling until capacity is Active (up to 4 min)...")
+            for attempt in range(1, 25):  # 24 × 10 s = 4 min
+                time.sleep(10)
+                check = requests.get(
+                    f"{FABRIC_BASE_URL}/capacities",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                )
+                if check.ok:
+                    for cap in check.json().get("value", []) or []:
+                        if cap.get("id", "").lower() == capacity_id.lower():
+                            new_state = cap.get("state", "Unknown")
+                            print(f"   [{attempt}] Capacity state: {new_state}")
+                            if new_state == "Active":
+                                print("   ✓ Capacity is now Active")
+                                return True
+                            break
+            print("   [WARN] Capacity did not become Active within 4 minutes")
+            return False
+
+        print(f"   [WARN] Unexpected capacity state: {state}")
+        return False
+    except Exception as exc:
+        print(f"   [WARN] Capacity state check failed (non-fatal): {exc}")
+        return False
+
+
 def add_workspace_member(
     workspace_id: str,
     principal_id: str,
@@ -1014,6 +1086,49 @@ def publish_dataagent(
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
 
 
+def _get_lakehouse_sm_id(workspace_id: str, lakehouse_id: str, token: str) -> Optional[str]:
+    """
+    Reads the default semantic model ID directly from the Lakehouse's API properties.
+
+    GET /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId} returns:
+      properties.defaultSemanticModel.id
+
+    This is the most reliable discovery path because:
+    - Uses Fabric REST API token (NOT Power BI token) — no 'Allow service
+      principals to use Power BI APIs' tenant setting required.
+    - Authoritative: the ID is stored directly in the Lakehouse metadata.
+    - Works even if the semantic model is not yet visible in the Items API.
+
+    Returns the semantic model ID string, or None if unavailable.
+    """
+    if not lakehouse_id:
+        return None
+    try:
+        resp = requests.get(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/lakehouses/{lakehouse_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if not resp.ok:
+            print(
+                f"   [WARN] GET /lakehouses/{lakehouse_id} returned HTTP {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+            return None
+        data = resp.json()
+        props = data.get("properties") or {}
+        sm = props.get("defaultSemanticModel") or {}
+        sm_id = sm.get("id")
+        if sm_id:
+            print(f"   ✓ Found semantic model ID in Lakehouse properties: {sm_id}")
+            return sm_id
+        # Print full properties for diagnostics when SM is absent
+        print(f"   Lakehouse properties (defaultSemanticModel absent): {props}")
+    except Exception as exc:
+        print(f"   [WARN] Lakehouse properties lookup failed (non-fatal): {exc}")
+    return None
+
+
 def trigger_default_semantic_model(
     workspace_id: str,
     lakehouse_id: str,
@@ -1156,6 +1271,15 @@ def get_default_semantic_model(
     """
     print(f"Looking for default semantic model: {lakehouse_name}")
 
+    # ── Strategy 0: Read SM ID from Lakehouse properties (fastest + most reliable) ──
+    # GET /v1/workspaces/{wid}/lakehouses/{lid} returns properties.defaultSemanticModel.id.
+    # This uses the Fabric token (not Power BI token), so it works regardless of
+    # tenant settings like 'Allow service principals to use Power BI APIs'.
+    sm_id = _get_lakehouse_sm_id(workspace_id, lakehouse_id, token)
+    if sm_id:
+        print(f"[OK] Semantic model found via Lakehouse properties (no retry needed): {sm_id}")
+        return sm_id
+
     # Explicitly trigger creation so Fabric materialises the model without
     # waiting for the background provisioner (which can take many minutes).
     trigger_default_semantic_model(workspace_id, lakehouse_id, token)
@@ -1210,7 +1334,13 @@ def get_default_semantic_model(
             except Exception as exc:
                 print(f"   [WARN] All-items fallback failed (non-fatal): {exc}")
 
-            # 2b. Power BI REST API -- often finds datasets not yet surfaced
+            # 2b. Re-check Lakehouse properties (SM may now be populated after trigger)
+            sm_id = _get_lakehouse_sm_id(workspace_id, lakehouse_id, token)
+            if sm_id:
+                print(f"[OK] Semantic model appeared in Lakehouse properties: {sm_id}")
+                return sm_id
+
+            # 2c. Power BI REST API -- often finds datasets not yet surfaced
             # in the Fabric Items API (e.g. immediately after first deploy).
             sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
             if sm_id:
@@ -1223,7 +1353,12 @@ def get_default_semantic_model(
             )
             time.sleep(30)
 
-    # Final attempt: Power BI API one last time before giving up.
+    # Final attempt: Lakehouse properties + Power BI API one last time before giving up.
+    print("   Final fallback: checking Lakehouse properties and Power BI API...")
+    sm_id = _get_lakehouse_sm_id(workspace_id, lakehouse_id, token)
+    if sm_id:
+        print(f"[OK] Semantic model found in final Lakehouse properties check: {sm_id}")
+        return sm_id
     print("   Trying Power BI REST API as final fallback...")
     sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
     if sm_id:
@@ -1581,6 +1716,29 @@ def main(argv=None) -> None:
         print(f"\n📐 Step {next_step}: Semantic Model")
         # Re-acquire token in case it expired during data upload
         fabric_token = get_fabric_token()
+
+        # Ensure the Fabric capacity is Active before searching for the SM.
+        # If the capacity was Paused when the Lakehouse was provisioned, Fabric
+        # would not have auto-created the default semantic model.
+        # Force-reassigning the workspace to an Active capacity triggers that
+        # retroactive creation (it may still take 60-90 s to materialise).
+        if args.capacity_id:
+            print("   Checking Fabric capacity state...")
+            capacity_active = ensure_capacity_active(args.capacity_id, fabric_token)
+            if capacity_active:
+                print(
+                    "   Re-assigning workspace to active capacity "
+                    "(triggers default semantic model creation if missing)..."
+                )
+                _assign_capacity(workspace_id, args.capacity_id, fabric_token)
+                print("   Waiting 90 s for Fabric to materialise the default semantic model...")
+                time.sleep(90)
+            else:
+                print(
+                    "   [WARN] Could not confirm capacity is Active — "
+                    "proceeding with semantic model search anyway"
+                )
+
         semantic_model_id = get_default_semantic_model(
             workspace_id, args.lakehouse_name, lakehouse_id, fabric_token
         )
