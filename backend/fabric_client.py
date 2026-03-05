@@ -139,37 +139,82 @@ class FabricClient:
         FABRIC_DATAAGENT_ID returns 404, so the backend self-heals after
         a re-deploy recreated the agent with a new GUID.
 
+        Tries two endpoints:
+          1. GET /workspaces/{id}/dataAgents        (dedicated Data Agent API)
+          2. GET /workspaces/{id}/items?type=DataAgent  (generic Items API fallback,
+             used when the agent was created via the Items API path)
+
         Returns the discovered agent ID, or None if not found.
         """
+        target = self.dataagent_name.lower()
+
+        # --- Path 1: dedicated /dataAgents endpoint ---
         try:
             list_url = (
                 f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}/dataAgents"
             )
             resp = requests.get(list_url, headers=self._headers(), timeout=30)
-            if not resp.ok:
+            if resp.ok:
+                agents = resp.json().get("value", [])
+                for agent in agents:
+                    if agent.get("displayName", "").lower() == target:
+                        discovered_id: str = agent["id"]
+                        logger.info(
+                            "Agent discovery (/dataAgents): found '%s' with ID %s (was %s)",
+                            self.dataagent_name,
+                            discovered_id,
+                            self.dataagent_id,
+                        )
+                        return discovered_id
                 logger.warning(
-                    "Agent discovery: GET /dataAgents returned %d", resp.status_code
+                    "Agent discovery (/dataAgents): '%s' not in workspace %s "
+                    "(%d agents listed) - trying /items fallback",
+                    self.dataagent_name,
+                    self.workspace_id,
+                    len(agents),
                 )
-                return None
-            agents = resp.json().get("value", [])
-            target = self.dataagent_name.lower()
-            for agent in agents:
-                if agent.get("displayName", "").lower() == target:
-                    discovered_id: str = agent["id"]
-                    logger.info(
-                        "Agent discovery: found '%s' with ID %s (was %s)",
-                        self.dataagent_name,
-                        discovered_id,
-                        self.dataagent_id,
-                    )
-                    return discovered_id
-            logger.warning(
-                "Agent discovery: no agent named '%s' found in workspace %s",
-                self.dataagent_name,
-                self.workspace_id,
-            )
+            else:
+                logger.warning(
+                    "Agent discovery: GET /dataAgents returned %d - trying /items fallback",
+                    resp.status_code,
+                )
         except Exception as exc:
-            logger.warning("Agent discovery failed (non-fatal): %s", exc)
+            logger.warning("Agent discovery /dataAgents failed (non-fatal): %s", exc)
+
+        # --- Path 2: generic /items?type=DataAgent endpoint ---
+        try:
+            items_url = (
+                f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
+                f"/items?type=DataAgent"
+            )
+            resp2 = requests.get(items_url, headers=self._headers(), timeout=30)
+            if resp2.ok:
+                items = resp2.json().get("value", [])
+                for item in items:
+                    if item.get("displayName", "").lower() == target:
+                        discovered_id = item["id"]
+                        logger.info(
+                            "Agent discovery (/items): found '%s' with ID %s (was %s)",
+                            self.dataagent_name,
+                            discovered_id,
+                            self.dataagent_id,
+                        )
+                        return discovered_id
+                logger.warning(
+                    "Agent discovery (/items): no DataAgent named '%s' in workspace %s "
+                    "(%d items listed)",
+                    self.dataagent_name,
+                    self.workspace_id,
+                    len(items),
+                )
+            else:
+                logger.warning(
+                    "Agent discovery: GET /items?type=DataAgent returned %d",
+                    resp2.status_code,
+                )
+        except Exception as exc:
+            logger.warning("Agent discovery /items failed (non-fatal): %s", exc)
+
         return None
 
     # ─── Public chat method ──────────────────────────────────────────────────

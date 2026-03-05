@@ -34,6 +34,8 @@ FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"   # OneLake ADLS Gen2 upload
 FABRIC_BASE_URL = "https://api.fabric.microsoft.com/v1"
 ONELAKE_DFS_URL = "https://onelake.dfs.fabric.microsoft.com"
+POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
+POWERBI_BASE_URL = "https://api.powerbi.com/v1.0/myorg"
 
 # ─── Polling config ──────────────────────────────────────────────────────────
 POLL_INTERVAL_SECONDS = 5
@@ -741,6 +743,56 @@ def get_or_create_dataagent(
 
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
 
+
+def _find_semantic_model_via_powerbi_api(
+    workspace_id: str,
+    lakehouse_name: str,
+) -> Optional[str]:
+    """
+    Tries to find the semantic model (dataset) using the Power BI REST API.
+
+    Uses a separate token scope ('https://analysis.windows.net/powerbi/api/.default')
+    and queries https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets.
+    The Power BI API sometimes exposes datasets that are not yet visible via the
+    Fabric Items API -- useful for first-run scenarios or workspaces where Fabric
+    has not yet surfaced the default semantic model in the items endpoint.
+
+    Returns the dataset ID string, or None if not found or on error.
+    """
+    try:
+        credential = DefaultAzureCredential()
+        pbi_token = credential.get_token(POWERBI_SCOPE).token
+        pbi_url = f"{POWERBI_BASE_URL}/groups/{workspace_id}/datasets"
+        resp = requests.get(
+            pbi_url,
+            headers={
+                "Authorization": f"Bearer {pbi_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=30,
+        )
+        if not resp.ok:
+            print(
+                f"   [WARN] Power BI API /datasets returned HTTP {resp.status_code}: "
+                f"{resp.text[:200]}"
+            )
+            return None
+        datasets = resp.json().get("value", []) or []
+        names = ", ".join(d.get("name", "?") for d in datasets) or "(none)"
+        print(f"   Power BI API found {len(datasets)} dataset(s): {names}")
+        for ds in datasets:
+            if ds.get("name") == lakehouse_name:
+                ds_id = ds["id"]
+                print(
+                    f"[OK] Found semantic model via Power BI API: "
+                    f"{lakehouse_name} (ID: {ds_id})"
+                )
+                return ds_id
+    except Exception as exc:
+        print(f"   [WARN] Power BI API fallback failed (non-fatal): {exc}")
+    return None
+
+
 def get_default_semantic_model(
     workspace_id: str,
     lakehouse_name: str,
@@ -749,55 +801,61 @@ def get_default_semantic_model(
 ) -> Optional[str]:
     """
     Finds the default Power BI Semantic Model that Fabric auto-creates when
-    a Lakehouse is provisioned.  Its display name matches the Lakehouse name.
+    a Lakehouse is provisioned on a Fabric capacity workspace.
+    Its display name matches the Lakehouse name.
 
     Retries up to `retries` times (30-second intervals, ~12 min total) because
     Fabric can take several minutes to materialise the default semantic model
-    after a table load — especially on first deploy.
+    after a table load -- especially on first deploy.
 
-    Searches both 'SemanticModel' and 'Dataset' item types (the type name
-    varies across Fabric API preview versions).  Falls back to listing all
-    workspace items if neither typed search finds it.
+    Search strategy (in order):
+      1. Fabric Items API  type=SemanticModel  (primary)
+      2. All-items listing + type-agnostic name match  (every 4th attempt)
+      3. Power BI REST API  api.powerbi.com/.../datasets  (every 4th attempt +
+         final fallback) -- uses analysis.windows.net/powerbi/api/.default scope.
+
+    Note: 'Dataset' is NOT a valid Fabric Items API type (returns HTTP 400
+    InvalidItemType) and is deliberately excluded from the search.
 
     Returns the semantic model item ID, or None if not found.
     """
-    print(f"📐 Looking for default semantic model: {lakehouse_name}")
+    print(f"Looking for default semantic model: {lakehouse_name}")
 
     for attempt in range(1, retries + 1):
-        # 1. Try SemanticModel type (current Fabric API name)
-        for item_type in ("SemanticModel", "Dataset"):
-            try:
-                resp = fabric_request(
-                    "GET",
-                    f"/workspaces/{workspace_id}/items?type={item_type}",
-                    token,
-                )
-                for item in resp.json().get("value", []) or []:
-                    if item.get("displayName") == lakehouse_name:
-                        sm_id = item["id"]
-                        print(
-                            f"✓ Found default semantic model: {lakehouse_name} "
-                            f"(ID: {sm_id}, type: {item_type})"
-                        )
-                        return sm_id
-            except Exception as exc:
-                print(f"   ⚠️  type={item_type} lookup failed (non-fatal): {exc}")
+        # 1. Fabric Items API -- type=SemanticModel only.
+        # NOTE: 'Dataset' is NOT a valid type (returns 400 InvalidItemType).
+        try:
+            resp = fabric_request(
+                "GET",
+                f"/workspaces/{workspace_id}/items?type=SemanticModel",
+                token,
+            )
+            for item in resp.json().get("value", []) or []:
+                if item.get("displayName") == lakehouse_name:
+                    sm_id = item["id"]
+                    print(
+                        f"[OK] Found default semantic model: {lakehouse_name} "
+                        f"(ID: {sm_id})"
+                    )
+                    return sm_id
+        except Exception as exc:
+            print(f"   [WARN] SemanticModel lookup failed (non-fatal): {exc}")
 
-        # 2. Every 4th attempt: list ALL items and dump names for diagnosis
+        # 2. Every 4th attempt: dump all workspace items + try Power BI REST API
         if attempt % 4 == 0:
+            # 2a. All-items diagnostic dump + type-agnostic name match
             try:
                 all_resp = fabric_request(
                     "GET", f"/workspaces/{workspace_id}/items", token
                 )
                 all_items = all_resp.json().get("value", []) or []
                 print(
-                    f"   Workspace items visible so far: "
-                    + ", ".join(
+                    "   Workspace items visible so far: "
+                    + (", ".join(
                         f"{i.get('displayName')} ({i.get('type')})"
                         for i in all_items
-                    ) or "(none)"
+                    ) or "(none)")
                 )
-                # Also try a partial-name / type-agnostic match
                 for item in all_items:
                     name = item.get("displayName", "")
                     itype = item.get("type", "")
@@ -806,24 +864,39 @@ def get_default_semantic_model(
                     ):
                         sm_id = item["id"]
                         print(
-                            f"✓ Found semantic model via all-items search: "
+                            f"[OK] Found semantic model via all-items search: "
                             f"{name} (ID: {sm_id}, type: {itype})"
                         )
                         return sm_id
             except Exception as exc:
-                print(f"   ⚠️  All-items fallback failed (non-fatal): {exc}")
+                print(f"   [WARN] All-items fallback failed (non-fatal): {exc}")
+
+            # 2b. Power BI REST API -- often finds datasets not yet surfaced
+            # in the Fabric Items API (e.g. immediately after first deploy).
+            sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
+            if sm_id:
+                return sm_id
 
         if attempt < retries:
             print(
-                f"   ↻ [{attempt}/{retries}] Semantic model not ready yet — "
+                f"   [{attempt}/{retries}] Semantic model not ready yet -- "
                 f"waiting 30s for Fabric to materialise it..."
             )
             time.sleep(30)
 
+    # Final attempt: Power BI API one last time before giving up.
+    print("   Trying Power BI REST API as final fallback...")
+    sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
+    if sm_id:
+        return sm_id
+
     print(
-        f"   ⚠️  Default semantic model '{lakehouse_name}' not found after "
+        f"   [WARN] Default semantic model '{lakehouse_name}' not found after "
         f"{retries} attempts ({retries * 30 // 60} min).\n"
-        "   You can create a Power BI report manually in the Fabric portal later."
+        "   This usually means the workspace is not assigned to a Fabric capacity.\n"
+        "   Assign the workspace to a Fabric capacity in the Fabric portal and\n"
+        "   re-run the deployment to let Fabric auto-create the default semantic model.\n"
+        "   You can also create a Power BI report manually in the Fabric portal."
     )
     return None
 
