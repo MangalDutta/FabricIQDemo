@@ -118,9 +118,9 @@ const App: React.FC = () => {
 
       setMessages(prev => [...prev, assistantMessage]);
 
-      // If we successfully got a response, the agent is working
+      // If we successfully got a response, refresh status to reflect reality
       if (agentStatus && !agentStatus.ready) {
-        setAgentStatus({ ...agentStatus, ready: true, message: `AI Agent is ready.`, troubleshooting: [] });
+        checkAgentStatus();
       }
     } catch (error: any) {
       const detail = error.response?.data?.detail;
@@ -240,7 +240,7 @@ const App: React.FC = () => {
                 {msg.isError && msg.failedMessage && (
                   <button
                     className="retry-btn"
-                    onClick={() => retryMessage(msg.failedMessage!)}
+                    onClick={() => retryMessage(msg.failedMessage as string)}
                     disabled={loading}
                   >
                     🔄 Retry
