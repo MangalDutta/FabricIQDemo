@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import './App.css';
 
@@ -6,6 +6,15 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp?: string;
+  isError?: boolean;
+  failedMessage?: string;
+}
+
+interface AgentStatus {
+  ready: boolean;
+  message: string;
+  agent_name: string | null;
+  troubleshooting: string[];
 }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
@@ -15,12 +24,34 @@ const App: React.FC = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
   // Power BI URL: fetched from the backend at runtime so it can be updated
   // via an App Service setting without rebuilding the Docker image.
   // Falls back to the build-time env var for local development.
   const [powerbiReportUrl, setPowerbiReportUrl] = useState<string>(
     import.meta.env.VITE_POWERBI_REPORT_URL || ''
   );
+
+  const checkAgentStatus = useCallback(async () => {
+    if (!BACKEND_URL) {
+      setStatusLoading(false);
+      return;
+    }
+    try {
+      const resp = await axios.get(`${BACKEND_URL}/api/status`);
+      setAgentStatus(resp.data);
+    } catch {
+      setAgentStatus({
+        ready: false,
+        message: 'Cannot reach the backend server. Please check that the backend is running.',
+        agent_name: null,
+        troubleshooting: [],
+      });
+    } finally {
+      setStatusLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!BACKEND_URL) return;
@@ -33,7 +64,9 @@ const App: React.FC = () => {
       .catch(() => {
         // Config fetch failed — keep the build-time VITE_ value as fallback
       });
-  }, []);
+
+    checkAgentStatus();
+  }, [checkAgentStatus]);
 
   const sampleQuestions = [
     'Top 5 customers by LifetimeValue in Maharashtra',
@@ -57,22 +90,23 @@ const App: React.FC = () => {
     setInput('');
   };
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+  const sendMessage = async (overrideMessage?: string) => {
+    const messageText = overrideMessage || input;
+    if (!messageText.trim()) return;
 
     const userMessage: Message = {
       role: 'user',
-      content: input,
+      content: messageText,
       timestamp: new Date().toISOString()
     };
 
     setMessages(prev => [...prev, userMessage]);
-    setInput('');
+    if (!overrideMessage) setInput('');
     setLoading(true);
 
     try {
       const response = await axios.post(`${BACKEND_URL}/api/chat`, {
-        message: input,
+        message: messageText,
         userId: 'web-user'
       });
 
@@ -83,6 +117,11 @@ const App: React.FC = () => {
       };
 
       setMessages(prev => [...prev, assistantMessage]);
+
+      // If we successfully got a response, the agent is working
+      if (agentStatus && !agentStatus.ready) {
+        setAgentStatus({ ...agentStatus, ready: true, message: `AI Agent is ready.`, troubleshooting: [] });
+      }
     } catch (error: any) {
       const detail = error.response?.data?.detail;
       let errorText: string;
@@ -95,6 +134,9 @@ const App: React.FC = () => {
           (steps.length > 0
             ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
             : detail.message || 'Please check the backend /api/debug endpoint for details.');
+
+        // Refresh agent status for the banner
+        checkAgentStatus();
       } else {
         errorText = `Error: ${typeof detail === 'string' ? detail : error.message || 'Failed to get response'}`;
       }
@@ -102,12 +144,18 @@ const App: React.FC = () => {
       const errorMessage: Message = {
         role: 'assistant',
         content: errorText,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        isError: true,
+        failedMessage: messageText,
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
       setLoading(false);
     }
+  };
+
+  const retryMessage = (message: string) => {
+    sendMessage(message);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -138,6 +186,31 @@ const App: React.FC = () => {
           </div>
         </div>
 
+        {!statusLoading && agentStatus && !agentStatus.ready && (
+          <div className="status-banner status-banner-warning">
+            <div className="status-banner-content">
+              <span className="status-banner-icon">⚠️</span>
+              <div className="status-banner-text">
+                <strong>AI Agent Not Ready</strong>
+                <p>{agentStatus.message}</p>
+                {agentStatus.troubleshooting.length > 0 && (
+                  <details className="status-banner-details">
+                    <summary>Setup instructions (admin)</summary>
+                    <ol>
+                      {agentStatus.troubleshooting.map((step, i) => (
+                        <li key={i}>{step}</li>
+                      ))}
+                    </ol>
+                  </details>
+                )}
+              </div>
+              <button className="status-banner-refresh" onClick={checkAgentStatus} title="Recheck status">
+                🔄
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="messages-container">
           {messages.length === 0 && (
             <div className="welcome-message">
@@ -158,12 +231,21 @@ const App: React.FC = () => {
           )}
 
           {messages.map((msg, idx) => (
-            <div key={idx} className={`message message-${msg.role}`}>
+            <div key={idx} className={`message message-${msg.role}${msg.isError ? ' message-error' : ''}`}>
               <div className="message-avatar">
-                {msg.role === 'user' ? '👤' : '🤖'}
+                {msg.role === 'user' ? '👤' : msg.isError ? '⚠️' : '🤖'}
               </div>
               <div className="message-content">
                 <div className="message-text" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                {msg.isError && msg.failedMessage && (
+                  <button
+                    className="retry-btn"
+                    onClick={() => retryMessage(msg.failedMessage!)}
+                    disabled={loading}
+                  >
+                    🔄 Retry
+                  </button>
+                )}
                 {msg.timestamp && (
                   <div className="message-timestamp">
                     {new Date(msg.timestamp).toLocaleTimeString()}
@@ -195,12 +277,16 @@ const App: React.FC = () => {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about customers, churn risk, revenue trends..."
+            placeholder={
+              agentStatus && !agentStatus.ready
+                ? 'AI Agent is not ready — see banner above for details'
+                : 'Ask about customers, churn risk, revenue trends...'
+            }
             disabled={loading}
             className="chat-input"
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={loading || !input.trim()}
             className="send-button"
           >

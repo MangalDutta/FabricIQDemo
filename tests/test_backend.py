@@ -142,6 +142,125 @@ class TestConfigEndpoint:
                 assert resp.json()["powerbi_report_url"] == "https://app.powerbi.com/test-report"
 
 
+# ─── Status endpoint tests ────────────────────────────────────────────────────
+
+class TestStatusEndpoint:
+    def test_status_returns_200(self, test_client_with_fabric):
+        resp = test_client_with_fabric.get("/api/status")
+        assert resp.status_code == 200
+
+    def test_status_response_has_required_keys(self, test_client_with_fabric):
+        resp = test_client_with_fabric.get("/api/status")
+        data = resp.json()
+        assert "ready" in data
+        assert "message" in data
+        assert "troubleshooting" in data
+
+    def test_status_not_ready_when_fabric_not_configured(self, test_client_no_fabric):
+        """When FabricClient failed to init, /api/status must return ready=False."""
+        resp = test_client_no_fabric.get("/api/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ready"] is False
+        assert isinstance(data["troubleshooting"], list)
+        assert len(data["troubleshooting"]) > 0
+
+    def test_status_ready_when_agent_published(self):
+        """When the Fabric agent is in a published state, status returns ready=True."""
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {"state": "Published"}
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", return_value=mock_resp):
+                    client = TestClient(app_module.app)
+                    resp = client.get("/api/status")
+                    assert resp.status_code == 200
+                    data = resp.json()
+                    assert data["ready"] is True
+                    assert len(data["troubleshooting"]) == 0
+
+    def test_status_not_ready_when_agent_draft(self):
+        """When agent state is Draft, status returns ready=False with troubleshooting."""
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {"state": "Draft"}
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", return_value=mock_resp):
+                    client = TestClient(app_module.app)
+                    resp = client.get("/api/status")
+                    assert resp.status_code == 200
+                    data = resp.json()
+                    assert data["ready"] is False
+                    assert len(data["troubleshooting"]) > 0
+                    assert "Draft" in data["message"]
+
+    def test_status_not_ready_when_agent_unreachable(self):
+        """When agent returns non-200, status returns ready=False."""
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        mock_resp = MagicMock()
+        mock_resp.ok = False
+        mock_resp.status_code = 404
+        mock_resp.text = "Not Found"
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", return_value=mock_resp):
+                    client = TestClient(app_module.app)
+                    resp = client.get("/api/status")
+                    assert resp.status_code == 200
+                    data = resp.json()
+                    assert data["ready"] is False
+                    assert len(data["troubleshooting"]) > 0
+
+
 # ─── Chat endpoint – happy path ───────────────────────────────────────────────
 
 class TestChatEndpointHappyPath:
