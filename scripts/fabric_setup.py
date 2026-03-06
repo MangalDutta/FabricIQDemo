@@ -1146,8 +1146,8 @@ def publish_dataagent(
       2. POST /v1/workspaces/{id}/dataAgents/{id}/activate
       3. POST /v1/workspaces/{id}/items/{id}/publish  (generic item publish)
 
-    Failure is non-fatal with a clear manual fallback message — the agent may
-    already be active if it was created via the dedicated /dataAgents endpoint.
+    After attempting to publish, verifies the agent state via GET and warns
+    clearly if the agent is still in Draft state (manual publish required).
     """
     print(f"   Publishing Data Agent '{agent_name}'...")
 
@@ -1157,6 +1157,7 @@ def publish_dataagent(
         f"/workspaces/{workspace_id}/items/{agent_id}/publish",
     ]
 
+    published_via_api = False
     for endpoint in endpoints:
         try:
             resp = requests.post(
@@ -1170,13 +1171,15 @@ def publish_dataagent(
             )
             if resp.status_code in (200, 201, 204):
                 print(f"   OK  Data Agent published via {endpoint} (HTTP {resp.status_code}).")
-                return
+                published_via_api = True
+                break
             if resp.status_code == 202:
                 op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
                 if op_id:
                     poll_operation(op_id, token, "data agent publish")
                 print(f"   OK  Data Agent publish accepted via {endpoint} (202).")
-                return
+                published_via_api = True
+                break
             if resp.status_code == 404:
                 # Endpoint doesn't exist in this API version — try next
                 continue
@@ -1184,15 +1187,56 @@ def publish_dataagent(
         except Exception as exc:
             print(f"   [{endpoint}] exception (non-fatal): {exc}")
 
-    # If none of the endpoints worked it likely means the agent is published
-    # automatically upon creation in the current preview version.
-    print(
-        "   INFO: No dedicated publish endpoint responded successfully.\n"
-        "   The Data Agent may already be active (this is normal for agents\n"
-        "   created via the /dataAgents endpoint — they publish on creation).\n"
-        "   If queries fail, open the Fabric portal and click 'Publish' manually:\n"
-        f"   https://app.fabric.microsoft.com/groups/{workspace_id} -> Open '{agent_name}'"
-    )
+    if not published_via_api:
+        print(
+            "   INFO: No dedicated publish endpoint responded successfully.\n"
+            "   The Data Agent may already be active (this is normal for agents\n"
+            "   created via the /dataAgents endpoint — they publish on creation)."
+        )
+
+    # ── Post-publish verification ─────────────────────────────────────────
+    # Check the agent state to confirm it is queryable.  If it is still in
+    # Draft state, print a prominent warning with manual instructions.
+    try:
+        check_resp = requests.get(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if check_resp.ok:
+            agent_data = check_resp.json()
+            raw_state = (
+                agent_data.get("state")
+                or agent_data.get("status")
+                or agent_data.get("publishState")
+                or "unknown"
+            )
+            state_lower = str(raw_state).lower()
+            if state_lower in ("draft", "unpublished", "inactive"):
+                print(
+                    "\n"
+                    "   ╔══════════════════════════════════════════════════════════╗\n"
+                    "   ║  ⚠️  ACTION REQUIRED: Agent is still in DRAFT state!    ║\n"
+                    "   ╠══════════════════════════════════════════════════════════╣\n"
+                    "   ║  The automated publish did not succeed. Queries will    ║\n"
+                    "   ║  return HTTP 404 until the agent is published.          ║\n"
+                    "   ║                                                          ║\n"
+                    "   ║  To fix:                                                 ║\n"
+                    "   ║  1. Open the Fabric portal:                              ║\n"
+                    f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}\n"
+                    f"   ║  2. Open the agent '{agent_name}'                       ║\n"
+                    "   ║  3. Click 'Publish' in the top ribbon                   ║\n"
+                    "   ╚══════════════════════════════════════════════════════════╝\n"
+                )
+            else:
+                print(f"   ✓ Agent state verified: '{raw_state}' — agent is queryable.")
+        else:
+            print(
+                f"   [WARN] Post-publish GET returned HTTP {check_resp.status_code} — "
+                "could not verify agent state."
+            )
+    except Exception as exc:
+        print(f"   [WARN] Post-publish verification failed (non-fatal): {exc}")
 
 
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────

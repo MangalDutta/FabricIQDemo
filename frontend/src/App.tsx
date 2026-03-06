@@ -84,9 +84,24 @@ const App: React.FC = () => {
 
       setMessages(prev => [...prev, assistantMessage]);
     } catch (error: any) {
+      const detail = error.response?.data?.detail;
+      let errorText: string;
+
+      if (detail && typeof detail === 'object' && detail.error === 'agent_not_ready') {
+        // Structured error from backend — show troubleshooting steps
+        const steps = (detail.troubleshooting || []) as string[];
+        errorText =
+          '⚠️ The AI Agent is not ready yet.\n\n' +
+          (steps.length > 0
+            ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
+            : detail.message || 'Please check the backend /api/debug endpoint for details.');
+      } else {
+        errorText = `Error: ${typeof detail === 'string' ? detail : error.message || 'Failed to get response'}`;
+      }
+
       const errorMessage: Message = {
         role: 'assistant',
-        content: `Error: ${error.response?.data?.detail || error.message || 'Failed to get response'}`,
+        content: errorText,
         timestamp: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -148,7 +163,7 @@ const App: React.FC = () => {
                 {msg.role === 'user' ? '👤' : '🤖'}
               </div>
               <div className="message-content">
-                <div className="message-text">{msg.content}</div>
+                <div className="message-text" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
                 {msg.timestamp && (
                   <div className="message-timestamp">
                     {new Date(msg.timestamp).toLocaleTimeString()}
