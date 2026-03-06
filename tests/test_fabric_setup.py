@@ -9,6 +9,7 @@ Run with:
     PYTHONPATH=scripts pytest tests/test_fabric_setup.py -v
 """
 
+import base64
 import json
 import os
 import sys
@@ -595,7 +596,6 @@ class TestCreateDirectLakeSemanticModel:
             fs.create_direct_lake_semantic_model("ws1", "M", "T", "tok")
         parts = mock_post.call_args[1]["json"]["definition"]["parts"]
         pbism_part = next(p for p in parts if p["path"] == "definition.pbism")
-        import base64
         decoded = json.loads(base64.b64decode(pbism_part["payload"]))
         assert decoded["version"] == "1.0"
         assert "settings" in decoded
@@ -613,7 +613,6 @@ class TestCreateDirectLakeSemanticModel:
 class TestBuildReportDefinition:
     def test_report_json_has_no_top_level_id(self):
         """report.json must NOT include a top-level 'id' field."""
-        import base64
         defn = fs._build_report_definition("sm-id-1")
         rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
         report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
@@ -623,7 +622,6 @@ class TestBuildReportDefinition:
 
     def test_section_has_no_type_field(self):
         """Sections must NOT include 'type: 20' (tooltip page type)."""
-        import base64
         defn = fs._build_report_definition("sm-id-1")
         rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
         report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
@@ -634,7 +632,6 @@ class TestBuildReportDefinition:
 
     def test_pbir_references_semantic_model(self):
         """definition.pbir must reference the provided semantic model ID."""
-        import base64
         defn = fs._build_report_definition("test-sm-id")
         pbir_part = next(p for p in defn["parts"] if p["path"] == "definition.pbir")
         pbir_obj = json.loads(base64.b64decode(pbir_part["payload"]))
