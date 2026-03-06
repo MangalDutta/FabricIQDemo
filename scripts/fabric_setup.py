@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -1285,30 +1286,255 @@ def _get_lakehouse_sm_id(workspace_id: str, lakehouse_id: str, token: str) -> Op
     return None
 
 
+def _build_direct_lake_bim(model_name: str, table_name: str) -> Dict[str, Any]:
+    """
+    Build a minimal BIM (JSON) for a Direct Lake semantic model that connects
+    to a Fabric Lakehouse via entity-based Direct Lake partitions.
+
+    The model uses 'Lakehouse.Contents(null)' as the M expression source —
+    Fabric binds this automatically to the workspace's Lakehouse when the
+    semantic model item is created inside the same workspace.
+
+    The Customer360 column schema is hardcoded because this accelerator
+    always loads the same table; change if you adapt the project.
+    """
+    columns = [
+        {
+            "name": "CustomerId", "dataType": "string",
+            "sourceColumn": "CustomerId", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none",
+        },
+        {
+            "name": "FullName", "dataType": "string",
+            "sourceColumn": "FullName", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none",
+        },
+        {
+            "name": "State", "dataType": "string",
+            "sourceColumn": "State", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none",
+        },
+        {
+            "name": "City", "dataType": "string",
+            "sourceColumn": "City", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none",
+        },
+        {
+            "name": "Segment", "dataType": "string",
+            "sourceColumn": "Segment", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none",
+        },
+        {
+            "name": "LifetimeValue", "dataType": "decimal",
+            "sourceColumn": "LifetimeValue", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "sum", "formatString": "#,0.00",
+        },
+        {
+            "name": "MonthlyRevenue", "dataType": "decimal",
+            "sourceColumn": "MonthlyRevenue", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "sum", "formatString": "#,0.00",
+        },
+        {
+            "name": "ChurnRiskScore", "dataType": "decimal",
+            "sourceColumn": "ChurnRiskScore", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "average", "formatString": "0.0",
+        },
+        {
+            "name": "LastPurchaseDate", "dataType": "dateTime",
+            "sourceColumn": "LastPurchaseDate", "lineageTag": str(uuid.uuid4()),
+            "summarizeBy": "none", "formatString": "Short Date",
+        },
+    ]
+    return {
+        "name": model_name,
+        "compatibilityLevel": 1604,
+        "model": {
+            "defaultPowerBIDataSourceVersion": "powerBI_V3",
+            "defaultMode": "directLake",
+            "expressions": [
+                {
+                    "name": "DatabaseQuery",
+                    "kind": "m",
+                    "expression": (
+                        "let\n"
+                        "    database = Lakehouse.Contents(null)\n"
+                        "in\n"
+                        "    database"
+                    ),
+                }
+            ],
+            "annotations": [
+                {"name": "PBI_QueryOrder", "value": f"[\"{table_name}\"]"}
+            ],
+            "tables": [
+                {
+                    "name": table_name,
+                    "lineageTag": str(uuid.uuid4()),
+                    "columns": columns,
+                    "partitions": [
+                        {
+                            "name": table_name,
+                            "mode": "directLake",
+                            "source": {
+                                "type": "entity",
+                                "schemaName": "dbo",
+                                "entityName": table_name,
+                                "expressionSource": "DatabaseQuery",
+                            },
+                        }
+                    ],
+                    "annotations": [
+                        {"name": "PBI_NavigationStepName", "value": "Navigation"},
+                        {"name": "PBI_ResultType", "value": "Table"},
+                    ],
+                }
+            ],
+            "roles": [],
+        },
+    }
+
+
+def create_direct_lake_semantic_model(
+    workspace_id: str,
+    model_name: str,
+    table_name: str,
+    token: str,
+) -> Optional[str]:
+    """
+    Creates a Direct Lake SemanticModel Fabric item via the Fabric Items API.
+
+    This is the PRIMARY path for semantic model creation.  It does not rely
+    on createDefaultSemanticModel (which returns HTTP 404 for service
+    principals when 'Allow service principals to use Power BI APIs' is not
+    enabled in the Power BI tenant settings).
+
+    Strategy:
+      1. POST /v1/workspaces/{wid}/items  (type=SemanticModel, with BIM)
+      2. If that returns 4xx, retry with /semanticModels endpoint.
+      3. If resp is 202 Accepted, poll the long-running operation.
+      4. If resp is 409 Conflict, look up and return the existing model ID.
+
+    Returns the semantic model item ID, or None on failure.
+    """
+    print(f"   Creating Direct Lake semantic model via Fabric Items API: {model_name}")
+
+    bim = _build_direct_lake_bim(model_name, table_name)
+    bim_b64 = base64.b64encode(json.dumps(bim, indent=2).encode()).decode()
+
+    payload: Dict[str, Any] = {
+        "displayName": model_name,
+        "type": "SemanticModel",
+        "definition": {
+            "parts": [
+                {
+                    "path": "model.bim",
+                    "payload": bim_b64,
+                    "payloadType": "InlineBase64",
+                }
+            ]
+        },
+    }
+
+    # Try the general items endpoint first, then the type-specific endpoint.
+    for endpoint in (
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
+        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/semanticModels",
+    ):
+        try:
+            resp = requests.post(
+                endpoint,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120,
+            )
+
+            if resp.status_code in (200, 201):
+                sm_id = resp.json().get("id")
+                if sm_id:
+                    print(f"   ✓ Direct Lake semantic model created (ID: {sm_id})")
+                    return sm_id
+
+            elif resp.status_code == 202:
+                op_id = (
+                    resp.headers.get("x-ms-operation-id")
+                    or resp.headers.get("x-ms-operationid")
+                    or resp.headers.get("Location", "")
+                )
+                print(f"   Async creation accepted — polling operation...")
+                if op_id:
+                    try:
+                        poll_operation(op_id, token, "Direct Lake semantic model creation")
+                    except Exception as poll_exc:
+                        print(f"   [WARN] Async polling failed (non-fatal): {poll_exc}")
+                # Re-fetch from workspace items after async step
+                time.sleep(5)
+                try:
+                    ir = fabric_request(
+                        "GET",
+                        f"/workspaces/{workspace_id}/items?type=SemanticModel",
+                        token,
+                    )
+                    for item in ir.json().get("value", []) or []:
+                        if item.get("displayName") == model_name:
+                            sm_id = item["id"]
+                            print(f"   ✓ Direct Lake semantic model ready (ID: {sm_id})")
+                            return sm_id
+                except Exception as fetch_exc:
+                    print(f"   [WARN] Re-fetch after async creation failed: {fetch_exc}")
+
+            elif resp.status_code == 409:
+                # Already exists — look it up
+                print(f"   Semantic model '{model_name}' already exists (409) — looking up ID...")
+                try:
+                    ir = fabric_request(
+                        "GET",
+                        f"/workspaces/{workspace_id}/items?type=SemanticModel",
+                        token,
+                    )
+                    for item in ir.json().get("value", []) or []:
+                        if item.get("displayName") == model_name:
+                            sm_id = item["id"]
+                            print(f"   ✓ Found existing semantic model (ID: {sm_id})")
+                            return sm_id
+                except Exception as lu_exc:
+                    print(f"   [WARN] Lookup after 409 failed: {lu_exc}")
+
+            else:
+                print(
+                    f"   [WARN] {endpoint.split('/')[-1]} endpoint returned "
+                    f"HTTP {resp.status_code}: {resp.text[:300]}"
+                )
+
+        except Exception as exc:
+            print(f"   [WARN] {endpoint}: {exc}")
+
+    return None
+
+
 def trigger_default_semantic_model(
     workspace_id: str,
     lakehouse_id: str,
     token: str,
 ) -> None:
     """
-    Explicitly requests Fabric to create (or refresh) the default Power BI
-    Semantic Model for a Lakehouse.
+    Secondary trigger: calls the Fabric Lakehouse-specific
+    createDefaultSemanticModel endpoint as a fallback after the primary
+    direct-creation path (create_direct_lake_semantic_model) has already
+    been attempted.
 
-    Calls POST /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}/createDefaultSemanticModel.
-
-    Without an explicit trigger the semantic model may take many minutes to
-    auto-materialise (or never appear if Fabric's background provisioner has not
-    run yet).  This call accelerates that process.
-
-    Non-fatal: silently continues if the endpoint returns an error (the model
-    may already exist, the endpoint may not be available in the current preview
-    version, or the capacity type may not support it).
+    This endpoint requires 'Allow service principals to use Power BI APIs'
+    to be enabled in the Power BI tenant settings. It commonly returns 404
+    for service principals where that setting is off — which is non-fatal
+    since the Items API path is tried first.
     """
     url = (
         f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
         f"/lakehouses/{lakehouse_id}/createDefaultSemanticModel"
     )
-    print("   Triggering default semantic model creation via Fabric API...")
+    print("   Trying createDefaultSemanticModel endpoint as secondary trigger...")
     try:
         resp = requests.post(
             url,
@@ -1320,7 +1546,7 @@ def trigger_default_semantic_model(
             timeout=60,
         )
         if resp.status_code in (200, 201, 204):
-            print("   ✓ Semantic model creation triggered successfully.")
+            print("   ✓ createDefaultSemanticModel succeeded.")
         elif resp.status_code == 202:
             op_id = (
                 resp.headers.get("x-ms-operation-id")
@@ -1331,16 +1557,15 @@ def trigger_default_semantic_model(
                     poll_operation(op_id, token, "default semantic model creation")
                     print("   ✓ Semantic model creation completed.")
                 except Exception as poll_exc:
-                    print(f"   [WARN] Semantic model creation polling failed (non-fatal): {poll_exc}")
+                    print(f"   [WARN] Polling failed (non-fatal): {poll_exc}")
             else:
-                print("   Semantic model creation accepted (202) — no operation ID to poll.")
+                print("   Accepted (202) — no operation ID to poll.")
         elif resp.status_code == 409:
-            # Conflict = model already exists, which is fine
-            print("   Semantic model already exists (409 Conflict) — skipping creation.")
+            print("   Semantic model already exists (409) — skipping.")
         else:
             print(
                 f"   [WARN] createDefaultSemanticModel returned HTTP {resp.status_code}: "
-                f"{resp.text[:200]} (non-fatal)"
+                f"{resp.text[:200]} (non-fatal — primary creation path already attempted)"
             )
     except Exception as exc:
         print(f"   [WARN] createDefaultSemanticModel call failed (non-fatal): {exc}")
@@ -1400,44 +1625,51 @@ def get_default_semantic_model(
     lakehouse_name: str,
     lakehouse_id: str,
     token: str,
-    retries: int = 8,
+    table_name: str = "Customer360",
+    retries: int = 16,
 ) -> Optional[str]:
     """
-    Finds the default Power BI Semantic Model that Fabric auto-creates when
-    a Lakehouse is provisioned on a Fabric capacity workspace.
-    Its display name matches the Lakehouse name.
+    Finds or creates the Power BI Semantic Model for the Lakehouse.
 
-    Explicitly triggers creation via
-    POST /v1/workspaces/{workspaceId}/lakehouses/{lakehouseId}/createDefaultSemanticModel
-    before polling, so the model appears faster (especially on first deploy).
+    Creation strategy (in order — each is tried before falling back to polling):
+      0. Read SM ID from Lakehouse properties  (fastest path; works when Fabric
+         already auto-created the model)
+      1. Create a Direct Lake SemanticModel item via Fabric Items API  (primary
+         creation path; does NOT require 'Allow service principals to use Power
+         BI APIs' tenant setting — this is what the createDefaultSemanticModel
+         endpoint requires and why it returns 404 for many service principals)
+      2. Call createDefaultSemanticModel as a secondary trigger  (fallback; may
+         succeed on tenants where the Power BI API setting is enabled)
 
-    Retries up to `retries` times (30-second intervals) because Fabric can take
-    several minutes to materialise the default semantic model after a table load.
+    Discovery poll (up to `retries` × 30 s after creation attempts):
+      a. Fabric Items API  type=SemanticModel
+      b. Every 4th attempt: all-items dump + name-agnostic match
+      c. Every 4th attempt: re-read Lakehouse properties
+      d. Every 4th attempt: Power BI REST API datasets fallback
 
-    Search strategy (in order):
-      1. Fabric Items API  type=SemanticModel  (primary)
-      2. All-items listing + type-agnostic name match  (every 4th attempt)
-      3. Power BI REST API  api.powerbi.com/.../datasets  (every 4th attempt +
-         final fallback) -- uses analysis.windows.net/powerbi/api/.default scope.
+    Note: 'Dataset' is NOT a valid Fabric Items API type (HTTP 400
+    InvalidItemType) and is deliberately excluded.
 
-    Note: 'Dataset' is NOT a valid Fabric Items API type (returns HTTP 400
-    InvalidItemType) and is deliberately excluded from the search.
-
-    Returns the semantic model item ID, or None if not found.
+    Returns the semantic model item ID, or None if not found/created.
     """
     print(f"Looking for default semantic model: {lakehouse_name}")
 
-    # ── Strategy 0: Read SM ID from Lakehouse properties (fastest + most reliable) ──
-    # GET /v1/workspaces/{wid}/lakehouses/{lid} returns properties.defaultSemanticModel.id.
-    # This uses the Fabric token (not Power BI token), so it works regardless of
-    # tenant settings like 'Allow service principals to use Power BI APIs'.
+    # ── Strategy 0: Read SM ID from Lakehouse properties ─────────────────────
     sm_id = _get_lakehouse_sm_id(workspace_id, lakehouse_id, token)
     if sm_id:
         print(f"[OK] Semantic model found via Lakehouse properties (no retry needed): {sm_id}")
         return sm_id
 
-    # Explicitly trigger creation so Fabric materialises the model without
-    # waiting for the background provisioner (which can take many minutes).
+    # ── Strategy 1: Create Direct Lake SemanticModel via Fabric Items API ────
+    # This is the PRIMARY creation path. It does not require the Power BI API
+    # tenant setting and avoids the 404 returned by createDefaultSemanticModel
+    # for service principals without that setting enabled.
+    sm_id = create_direct_lake_semantic_model(workspace_id, lakehouse_name, table_name, token)
+    if sm_id:
+        return sm_id
+
+    # ── Strategy 2: createDefaultSemanticModel secondary trigger ─────────────
+    # Kept as a fallback for tenants where the Power BI API setting is enabled.
     trigger_default_semantic_model(workspace_id, lakehouse_id, token)
 
     for attempt in range(1, retries + 1):
@@ -1522,7 +1754,7 @@ def get_default_semantic_model(
 
     print(
         f"\n   [WARN] Default semantic model '{lakehouse_name}' not found after "
-        f"{retries} attempts ({retries * 30 // 60} min).\n"
+        f"{retries} poll attempts ({retries * 30 // 60} min) + direct creation attempts.\n"
         "\n"
         "   Checklist to fix this:\n"
         "   1. Provide 'fabric_capacity_id' in the workflow inputs (most common cause).\n"
@@ -1896,7 +2128,8 @@ def main(argv=None) -> None:
                 )
 
         semantic_model_id = get_default_semantic_model(
-            workspace_id, args.lakehouse_name, lakehouse_id, fabric_token
+            workspace_id, args.lakehouse_name, lakehouse_id, fabric_token,
+            table_name=args.table_name,
         )
 
         # ── 7 / 8. Power BI Report ────────────────────────────────────────
