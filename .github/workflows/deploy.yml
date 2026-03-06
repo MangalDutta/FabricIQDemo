@@ -22,59 +22,17 @@ on:
         description: 'Azure region (e.g. centralindia, eastus)'
         required: true
         default: 'centralindia'
-      base_name:
-        description: 'Base name for resources (e.g. cust360)'
-        required: true
-        default: 'cust360'
-      environment:
-        description: 'Environment (dev / test / prod)'
-        required: true
-        default: 'dev'
 
       # --- Fabric workspace ---
       workspace_name:
         description: 'Fabric workspace display name'
         required: true
-      lakehouse_name:
-        description: 'Lakehouse name'
-        required: true
-        default: 'Customer360Lakehouse'
-      table_name:
-        description: 'Delta table name for CSV data'
-        required: true
-        default: 'Customer360'
-      dataagent_name:
-        description: 'Fabric Data Agent name'
-        required: true
-        default: 'Customer360Agent'
       fabric_sku:
-        description: |
-          Provision a NEW Fabric capacity with this SKU.
-          Options: F2 | F4 | F8 | F16 | F32 | F64 | F128 | F256 | F512 | F1024 | F2048 | Trial
-          Leave blank to skip provisioning and supply fabric_capacity_id instead.
-        required: false
-        default: ''
-        type: choice
-        options:
-          - ''
-          - F2
-          - F4
-          - F8
-          - F16
-          - F32
-          - F64
-          - F128
-          - F256
-          - F512
-          - F1024
-          - F2048
-          - Trial
-      fabric_capacity_admin:
-        description: 'Email / UPN of the Fabric capacity admin (required when fabric_sku is set, e.g. admin@contoso.com)'
+        description: 'NEW Fabric capacity SKU (F2, F4, F8, F16, F32, F64, F128, F256, F512, F1024, F2048, Trial). Leave blank to use an existing capacity via fabric_capacity_id.'
         required: false
         default: ''
       fabric_capacity_id:
-        description: 'Existing Fabric capacityId GUID (Fabric Admin -> Capacity settings). Ignored when fabric_sku is set - the new capacity ID is used automatically.'
+        description: 'Existing Fabric capacityId GUID (Fabric Admin -> Capacity settings). Ignored when fabric_sku is set.'
         required: false
         default: ''
       skip_data_upload:
@@ -87,6 +45,14 @@ on:
         description: 'Power BI embedded report URL. Leave blank on first deploy - workflow will create the report. On re-deploy, paste the URL here.'
         required: false
         default: ''
+
+# Hardcoded defaults (not exposed as inputs to stay within the 10-input limit):
+#   base_name       = cust360
+#   environment     = dev
+#   lakehouse_name  = Customer360Lakehouse
+#   table_name      = Customer360
+#   dataagent_name  = Customer360Agent
+# Resource names will be: acr-cust360dev, app-cust360-backend-dev, app-cust360-frontend-dev, etc.
 
 jobs:
   deploy:
@@ -126,7 +92,7 @@ jobs:
             # hit a globally-unique name conflict in the Fabric RP.
             FABRIC_PARAMS=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+              CAP_DISPLAY_NAME="capcust360dev"
               FABRIC_TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv 2>/dev/null || true)
               CAP_ALREADY_EXISTS=""
               if [ -n "$FABRIC_TOKEN" ]; then
@@ -141,30 +107,13 @@ jobs:
               else
                 FABRIC_PARAMS="fabricSku=${{ inputs.fabric_sku }}"
 
-                # Resolve the capacity admin to an Object ID.
-                # The Fabric RP requires the member to be an existing Entra ID
-                # user or service principal - passing an invalid UPN causes
-                # "All provided principals must be existing..." ARM error.
-                ADMIN_OID=""
-                if [ -n "${{ inputs.fabric_capacity_admin }}" ]; then
-                  echo "  Resolving capacity admin: ${{ inputs.fabric_capacity_admin }}"
-                  ADMIN_OID=$(az ad user show --id "${{ inputs.fabric_capacity_admin }}" --query id -o tsv 2>/dev/null || \
-                              az ad sp show  --id "${{ inputs.fabric_capacity_admin }}" --query id -o tsv 2>/dev/null || echo "")
-                  if [ -z "$ADMIN_OID" ]; then
-                    echo "  [ERROR] '${{ inputs.fabric_capacity_admin }}' was not found in Entra ID."
-                    echo "  Provide a valid UPN (user@domain.com) of an existing Entra ID user, or leave fabric_capacity_admin blank to use the deploying service principal."
-                    exit 1
-                  fi
-                  echo "  Admin resolved -> OID: $ADMIN_OID"
+                # Use the deploying service principal as capacity admin.
+                echo "  Using deploying service principal as capacity admin"
+                ADMIN_OID=$(az ad sp show --id "${{ inputs.azure_client_id }}" --query id -o tsv 2>/dev/null || echo "")
+                if [ -z "$ADMIN_OID" ]; then
+                  echo "  [WARN] Could not resolve deploying SP OID - fabricCapacityAdmins will be empty (may fail)"
                 else
-                  # No admin supplied: fall back to the deploying service principal
-                  echo "  No fabric_capacity_admin set - using deploying service principal as capacity admin"
-                  ADMIN_OID=$(az ad sp show --id "${{ inputs.azure_client_id }}" --query id -o tsv 2>/dev/null || echo "")
-                  if [ -z "$ADMIN_OID" ]; then
-                    echo "  [WARN] Could not resolve deploying SP OID - fabricCapacityAdmins will be empty (may fail)"
-                  else
-                    echo "  Deploying SP OID: $ADMIN_OID"
-                  fi
+                  echo "  Deploying SP OID: $ADMIN_OID"
                 fi
 
                 if [ -n "$ADMIN_OID" ]; then
@@ -179,8 +128,8 @@ jobs:
               --resource-group "${{ inputs.resource_group }}" \
               --template-file infra/main.bicep \
               --parameters \
-                baseName="${{ inputs.base_name }}" \
-                env="${{ inputs.environment }}" \
+                baseName="cust360" \
+                env="dev" \
                 location="${{ inputs.location }}" \
                 $FABRIC_PARAMS \
               --output table; then
@@ -217,8 +166,7 @@ jobs:
             # assignment API requires.
             FABRIC_CAP_ID=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              # Derive the capacity display name the same way main.bicep does
-              CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')$(echo '${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+              CAP_DISPLAY_NAME="capcust360dev"
               echo "  Looking up Fabric capacity GUID for: $CAP_DISPLAY_NAME"
 
               FABRIC_TOKEN=$(az account get-access-token \
@@ -238,9 +186,6 @@ jobs:
             fi
 
             # Get the backend App Service System-Assigned Managed Identity principal ID.
-            # This MI must be added to the Fabric workspace so it can call the
-            # Data Agent query API.  Without workspace membership Fabric returns
-            # HTTP 404 EntityNotFound (not 401) for all resource requests from the MI.
             BE_MI_PRINCIPAL_ID=$(az webapp identity show \
               --name "$BE_APP" \
               --resource-group "$RG" \
@@ -311,7 +256,6 @@ jobs:
 
           # Pass the backend App Service MI principal ID so fabric_setup.py
           # can add it to the Fabric workspace as a Contributor.
-          # This is required for the backend to call the Fabric Data Agent query API.
           BE_MI="${{ steps.outputs.outputs.be_mi_principal_id }}"
           MI_FLAG=""
           if [ -n "$BE_MI" ]; then
@@ -320,15 +264,14 @@ jobs:
           else
             echo "  WARNING: Backend MI principal ID not available."
             echo "  The App Service Managed Identity will NOT be added to the Fabric workspace."
-            echo "  Re-run the workflow after the App Service has been created with a MI."
           fi
 
           python scripts/fabric_setup.py \
             --workspace_name "${{ inputs.workspace_name }}" \
-            --lakehouse_name "${{ inputs.lakehouse_name }}" \
+            --lakehouse_name "Customer360Lakehouse" \
             --csv_path "sample-data/customer360.csv" \
-            --table_name "${{ inputs.table_name }}" \
-            --dataagent_name "${{ inputs.dataagent_name }}" \
+            --table_name "Customer360" \
+            --dataagent_name "Customer360Agent" \
             --capacity_id "$CAPACITY_ID" \
             --report_name "Customer360 Report" \
             $SKIP_FLAG \
@@ -403,7 +346,7 @@ jobs:
               --settings \
                 FABRIC_WORKSPACE_ID="$WORKSPACE_ID" \
                 FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
-                FABRIC_DATAAGENT_NAME="${{ inputs.dataagent_name }}" \
+                FABRIC_DATAAGENT_NAME="Customer360Agent" \
                 POWERBI_REPORT_URL="$PBI_URL" \
                 CORS_ALLOWED_ORIGINS="$FE_URL" \
                 APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.outputs.outputs.app_insights_cs }}" \
@@ -490,7 +433,7 @@ jobs:
             echo "  Capacity    : (none specified - using workspace default)"
           fi
           echo "  Workspace URL: ${{ steps.fabric_setup.outputs.workspace_url }}"
-          echo "  Data Agent  : ${{ inputs.dataagent_name }}"
+          echo "  Data Agent  : Customer360Agent"
           echo "  Agent ID    : ${{ steps.fabric_setup.outputs.dataagent_id }}"
           echo ""
           echo "Power BI:"

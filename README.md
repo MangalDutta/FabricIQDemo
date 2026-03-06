@@ -7,23 +7,44 @@
 
 ## ⚡ One-Click Deploy
 
-[![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml)
+Choose the deployment option that fits your scenario:
 
-> Click the button above → **"Run workflow"** → Fill in the inputs → Click **"Run workflow"** again.
-> Full deployment (infra + Fabric + Docker + App Service) completes in ~10 minutes.
+| Button | What it deploys | Requirements |
+|---|---|---|
+| [![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — Azure infra + Fabric workspace + Docker images + App Service configuration (~10 min) | GitHub OIDC configured (see Prerequisites) |
+| [![Deploy to Azure](https://aka.ms/deploytoazure)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Finfra%2Fmain.bicep) | **Infra only** — ACR + App Service + Key Vault + Log Analytics (optionally Fabric capacity) via Azure Portal | Azure subscription + Contributor role |
 
-**Minimum required inputs:**
+> **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
+> **Infra only** button → Azure Portal opens → Fill in parameters → **"Review + create"** → **"Create"**.
 
-| Input | Where to find it |
-|---|---|
-| `azure_subscription_id` | Azure Portal → Subscriptions |
-| `azure_tenant_id` | Azure Portal → Microsoft Entra ID → Overview |
-| `azure_client_id` | Entra ID → App registrations → your app → Application (client) ID |
-| `resource_group` | Any name, e.g. `rg-customer360-demo` |
-| `workspace_name` | Pick any name for your Fabric workspace |
-| `fabric_capacity_id` | Fabric Admin Portal → Capacity settings → copy GUID |
+### Full Stack — Required Inputs (6 required, 4 optional)
 
-All other inputs have sensible defaults — leave them as-is.
+| Input | Required | Where to find it |
+|---|---|---|
+| `azure_subscription_id` | ✅ | Azure Portal → Subscriptions |
+| `azure_tenant_id` | ✅ | Azure Portal → Microsoft Entra ID → Overview |
+| `azure_client_id` | ✅ | Entra ID → App registrations → your app → Application (client) ID |
+| `resource_group` | ✅ | Any name, e.g. `rg-customer360-demo` (created if absent) |
+| `location` | ✅ | Default: `centralindia` |
+| `workspace_name` | ✅ | Pick any name for your Fabric workspace |
+| `fabric_sku` | — | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity |
+| `fabric_capacity_id` | — | Existing capacity GUID (Fabric Admin → Capacity settings) |
+| `skip_data_upload` | — | Set `true` if customer data is already loaded |
+| `powerbi_report_url` | — | Leave blank on first deploy; add the embed URL on re-run |
+
+> Resource names are fixed: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`, `kv-cust360-dev`.
+
+### Infra Only — Azure Portal Parameters
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `baseName` | `cust360` | Prefix for all resource names |
+| `env` | `dev` | Suffix for all resource names |
+| `location` | Resource group location | Azure region |
+| `fabricSku` | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity |
+| `fabricCapacityAdmins` | *(blank)* | Required when `fabricSku` is set — UPN of a Fabric admin |
+
+> After the infra-only deployment, run the **Full stack** workflow with `skip_data_upload=false` to build and deploy the Docker images and set up the Fabric workspace.
 
 ---
 
