@@ -1421,16 +1421,27 @@ def create_direct_lake_semantic_model(
     bim = _build_direct_lake_bim(model_name, table_name)
     bim_b64 = base64.b64encode(json.dumps(bim, indent=2).encode()).decode()
 
+    # definition.pbism is a required connection descriptor for Fabric
+    # semantic models — omitting it causes HTTP 400 "Required artifact is
+    # missing in 'definition.pbism'".
+    pbism = {"version": "1.0", "settings": {}}
+    pbism_b64 = base64.b64encode(json.dumps(pbism).encode()).decode()
+
     payload: Dict[str, Any] = {
         "displayName": model_name,
         "type": "SemanticModel",
         "definition": {
             "parts": [
                 {
+                    "path": "definition.pbism",
+                    "payload": pbism_b64,
+                    "payloadType": "InlineBase64",
+                },
+                {
                     "path": "model.bim",
                     "payload": bim_b64,
                     "payloadType": "InlineBase64",
-                }
+                },
             ]
         },
     }
@@ -1802,7 +1813,6 @@ def _build_report_definition(semantic_model_id: str) -> Dict[str, Any]:
         },
     }
     report_json = {
-        "id": "00000000-0000-0000-0000-000000000000",
         "config": json.dumps({
             "version": "5.54",
             "themeCollection": {
@@ -1815,7 +1825,6 @@ def _build_report_definition(semantic_model_id: str) -> Dict[str, Any]:
         "resourcePackages": [],
         "sections": [
             {
-                "id": "ReportSection",
                 "name": "ReportSection",
                 "displayName": "Page 1",
                 "filters": "[]",
@@ -1824,7 +1833,6 @@ def _build_report_definition(semantic_model_id: str) -> Dict[str, Any]:
                 "config": json.dumps({"relationships": []}),
                 "height": 720,
                 "width": 1280,
-                "type": 20,
             }
         ],
     }

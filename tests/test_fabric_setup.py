@@ -9,6 +9,7 @@ Run with:
     PYTHONPATH=scripts pytest tests/test_fabric_setup.py -v
 """
 
+import base64
 import json
 import os
 import sys
@@ -571,3 +572,72 @@ class TestGetDefaultSemanticModel:
              patch("time.sleep"):
             fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
         mock_trigger.assert_called_once_with("ws1", "lh1", "tok")
+
+
+# ─── create_direct_lake_semantic_model ────────────────────────────────────────
+
+class TestCreateDirectLakeSemanticModel:
+    def test_payload_includes_pbism_and_bim(self):
+        """Payload must include both definition.pbism and model.bim parts."""
+        ok_resp = _ok_response({"id": "sm-1"}, 201)
+        with patch("requests.post", return_value=ok_resp) as mock_post:
+            result = fs.create_direct_lake_semantic_model("ws1", "MyModel", "Customer360", "tok")
+        assert result == "sm-1"
+        payload = mock_post.call_args[1]["json"]
+        parts = payload["definition"]["parts"]
+        paths = [p["path"] for p in parts]
+        assert "definition.pbism" in paths, "definition.pbism must be present"
+        assert "model.bim" in paths, "model.bim must be present"
+
+    def test_pbism_contains_version_and_settings(self):
+        """definition.pbism must decode to {version, settings}."""
+        ok_resp = _ok_response({"id": "sm-2"}, 201)
+        with patch("requests.post", return_value=ok_resp) as mock_post:
+            fs.create_direct_lake_semantic_model("ws1", "M", "T", "tok")
+        parts = mock_post.call_args[1]["json"]["definition"]["parts"]
+        pbism_part = next(p for p in parts if p["path"] == "definition.pbism")
+        decoded = json.loads(base64.b64decode(pbism_part["payload"]))
+        assert decoded["version"] == "1.0"
+        assert "settings" in decoded
+
+    def test_returns_none_on_failure(self):
+        """Should return None when both endpoints fail."""
+        err = _error_response(400, "Bad Request")
+        with patch("requests.post", return_value=err):
+            result = fs.create_direct_lake_semantic_model("ws1", "M", "T", "tok")
+        assert result is None
+
+
+# ─── _build_report_definition ─────────────────────────────────────────────────
+
+class TestBuildReportDefinition:
+    def test_report_json_has_no_top_level_id(self):
+        """report.json must NOT include a top-level 'id' field."""
+        defn = fs._build_report_definition("sm-id-1")
+        rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
+        report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
+        assert "id" not in report_obj, (
+            "Top-level 'id' in report.json causes deserialization failures"
+        )
+
+    def test_section_has_no_type_field(self):
+        """Sections must NOT include 'type: 20' (tooltip page type)."""
+        defn = fs._build_report_definition("sm-id-1")
+        rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
+        report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
+        section = report_obj["sections"][0]
+        assert "type" not in section, (
+            "Section 'type: 20' is invalid for a regular report page"
+        )
+
+    def test_pbir_references_semantic_model(self):
+        """definition.pbir must reference the provided semantic model ID."""
+        defn = fs._build_report_definition("test-sm-id")
+        pbir_part = next(p for p in defn["parts"] if p["path"] == "definition.pbir")
+        pbir_obj = json.loads(base64.b64decode(pbir_part["payload"]))
+        assert pbir_obj["datasetReference"]["byConnection"]["pbiModelDatabaseName"] == "test-sm-id"
+
+    def test_format_is_pbir_legacy(self):
+        """Definition format must be PBIR-Legacy."""
+        defn = fs._build_report_definition("sm-id")
+        assert defn["format"] == "PBIR-Legacy"
