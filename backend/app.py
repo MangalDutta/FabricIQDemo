@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 import requests as _requests
 
-from fabric_client import FabricClient
+from fabric_client import AgentNotReadyError, FabricClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("customer360-backend")
@@ -205,6 +205,22 @@ async def chat(request: Request) -> Dict[str, Any]:
         }
     except HTTPException:
         raise
+    except AgentNotReadyError as ex:
+        logger.warning(f"Agent not ready: {ex}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "agent_not_ready",
+                "message": str(ex),
+                "troubleshooting": [
+                    "Open the Fabric portal and publish the agent: "
+                    f"https://app.fabric.microsoft.com/groups/{ex.workspace_id}",
+                    "Ensure the App Service Managed Identity is a workspace Contributor "
+                    "(Fabric portal → Workspace → Manage access → Add as Contributor)",
+                    "Visit the /api/debug endpoint on the backend for full diagnostics",
+                ],
+            },
+        )
     except Exception as ex:
         logger.exception(f"Chat error: {ex}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(ex)}")

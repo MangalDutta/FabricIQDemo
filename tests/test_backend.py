@@ -443,10 +443,12 @@ class TestFabricClientChat:
             mock_resp.ok = False
             mock_resp.status_code = 404
             mock_resp.text = "Data agent not found"
+            mock_resp.json.return_value = {"errorCode": "EntityNotFound"}
             return mock_resp
 
         with patch("requests.post", side_effect=fake_post):
-            with pytest.raises(RuntimeError, match="404"):
+            from fabric_client import AgentNotReadyError
+            with pytest.raises(AgentNotReadyError, match="404"):
                 client.chat("u5", "some question")
 
     def test_chat_returns_no_response_when_answer_empty(self):
@@ -494,3 +496,81 @@ class TestFabricClientChat:
                 client.chat("u8", "test")
 
         assert mock_primary.call_count == 3
+
+
+# ─── AgentNotReadyError tests ─────────────────────────────────────────────────
+
+class TestAgentNotReadyError:
+    """Tests for the AgentNotReadyError and the 503 handling path."""
+
+    def test_agent_not_ready_is_runtime_error(self):
+        """AgentNotReadyError must be a subclass of RuntimeError."""
+        from fabric_client import AgentNotReadyError
+        err = AgentNotReadyError("test", workspace_id="ws-1", agent_id="ag-1")
+        assert isinstance(err, RuntimeError)
+        assert err.workspace_id == "ws-1"
+        assert err.agent_id == "ag-1"
+
+    def test_draft_state_raises_agent_not_ready(self):
+        """Pre-flight detecting Draft state must raise AgentNotReadyError early."""
+        from fabric_client import AgentNotReadyError
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid-1234",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid-5678",
+            },
+        ):
+            import fabric_client as fc_module
+            importlib.reload(fc_module)
+            with patch("fabric_client.DefaultAzureCredential") as mock_cred_cls:
+                mock_cred = MagicMock()
+                mock_token = MagicMock()
+                mock_token.token = "fake-token"
+                mock_token.expires_on = 9999999999.0
+                mock_cred.get_token.return_value = mock_token
+                mock_cred_cls.return_value = mock_cred
+                client = fc_module.FabricClient()
+
+        # Mock the pre-flight GET to return Draft state
+        def fake_get(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            mock_resp.json.return_value = {"state": "Draft"}
+            return mock_resp
+
+        with patch("requests.get", side_effect=fake_get):
+            with pytest.raises(fc_module.AgentNotReadyError, match="Draft"):
+                client.chat("user1", "test question")
+
+    def test_chat_503_on_agent_not_ready(self):
+        """When FabricClient raises AgentNotReadyError, API returns 503 with structured detail."""
+        from fabric_client import AgentNotReadyError
+
+        mock_fc = MagicMock()
+        mock_fc.chat.side_effect = AgentNotReadyError(
+            "Agent in Draft state",
+            workspace_id="ws-id",
+            agent_id="ag-id",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake",
+                "FABRIC_DATAAGENT_ID": "agent-fake",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                client = TestClient(app_module.app)
+
+                resp = client.post("/api/chat", json={"message": "test"})
+                assert resp.status_code == 503
+                data = resp.json()
+                assert data["detail"]["error"] == "agent_not_ready"
+                assert isinstance(data["detail"]["troubleshooting"], list)
+                assert len(data["detail"]["troubleshooting"]) > 0

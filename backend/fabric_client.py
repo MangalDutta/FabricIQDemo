@@ -49,6 +49,20 @@ _QUERY_MAX_RETRIES = 3
 _QUERY_RETRY_WAIT = 10   # seconds
 
 
+class AgentNotReadyError(RuntimeError):
+    """Raised when the Fabric Data Agent exists but is not in a queryable state.
+
+    Typically means the agent is in Draft/Unpublished state and needs to be
+    published manually via the Fabric portal, or the App Service Managed
+    Identity has not been added to the workspace.
+    """
+
+    def __init__(self, message: str, *, workspace_id: str = "", agent_id: str = ""):
+        super().__init__(message)
+        self.workspace_id = workspace_id
+        self.agent_id = agent_id
+
+
 class FabricClient:
     """
     Chat client that calls the Fabric Data Agent query API directly.
@@ -345,19 +359,30 @@ class FabricClient:
                     "Agent pre-flight: '%s' state=%s",
                     self.dataagent_id, raw_state,
                 )
-                # If agent is in Draft state, log a specific warning
+                # If agent is in Draft state, fail fast with a clear,
+                # actionable error instead of burning through retry cycles
+                # that will all return 404.
                 if str(raw_state).lower() in ("draft", "unpublished", "inactive"):
-                    logger.warning(
-                        "Agent '%s' is in '%s' state — queries will return 404. "
-                        "Open the Fabric portal and click 'Publish' on the agent: "
-                        "https://app.fabric.microsoft.com/groups/%s",
-                        self.dataagent_id, raw_state, self.workspace_id,
+                    raise AgentNotReadyError(
+                        f"Fabric Data Agent '{self.dataagent_name}' is in "
+                        f"'{raw_state}' state and cannot answer queries yet.\n"
+                        f"To fix: open the Fabric portal, open the agent, "
+                        f"and click 'Publish':\n"
+                        f"  https://app.fabric.microsoft.com/groups/"
+                        f"{self.workspace_id}\n"
+                        f"After publishing, retry your question.\n"
+                        f"For diagnostics visit the /api/debug endpoint on "
+                        f"the backend.",
+                        workspace_id=self.workspace_id,
+                        agent_id=self.dataagent_id,
                     )
             else:
                 logger.warning(
                     "Agent pre-flight GET returned HTTP %d: %s",
                     agent_check.status_code, agent_check.text[:200],
                 )
+        except AgentNotReadyError:
+            raise
         except Exception as pre_exc:
             logger.debug("Agent pre-flight check failed (non-fatal): %s", pre_exc)
 
@@ -464,9 +489,9 @@ class FabricClient:
 
             # Build a helpful, actionable error message
             if status == 404:
-                raise RuntimeError(
-                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound).\n"
-                    f"Fabric error detail: {detail}\n"
+                raise AgentNotReadyError(
+                    f"Fabric Data Agent returned HTTP 404 (EntityNotFound). "
+                    f"The agent '{self.dataagent_name}' is not reachable.\n"
                     f"Two most common causes:\n"
                     f"  1. Agent is in DRAFT state (not Published). Open the Fabric portal, "
                     f"open the agent, and click 'Publish':\n"
@@ -474,8 +499,9 @@ class FabricClient:
                     f"  2. The App Service Managed Identity is not a workspace member. "
                     f"Re-run the deploy workflow to add it, or add manually:\n"
                     f"     Fabric portal -> Workspace -> Manage access -> Add as Contributor.\n"
-                    f"(workspace={self.workspace_id}, agent={self.dataagent_id}, "
-                    f"agent_name={self.dataagent_name})"
+                    f"Visit the /api/debug endpoint on the backend for diagnostics.",
+                    workspace_id=self.workspace_id,
+                    agent_id=self.dataagent_id,
                 )
             if status in (401, 403):
                 raise RuntimeError(
