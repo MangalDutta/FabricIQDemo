@@ -58,6 +58,99 @@ async def config() -> Dict[str, str]:
         "powerbi_report_url": os.environ.get("POWERBI_REPORT_URL", ""),
     }
 
+
+@app.get("/api/status")
+async def status() -> Dict[str, Any]:
+    """
+    Lightweight readiness probe for the Fabric Data Agent.
+
+    The frontend calls this on page load to show a proactive status banner
+    instead of letting the user discover failures only after sending a message.
+
+    Returns:
+        {
+            "ready": bool,
+            "message": str,           # human-readable status summary
+            "agent_name": str | None,
+            "troubleshooting": [str]   # empty when ready
+        }
+    """
+    if not fabric_client:
+        return {
+            "ready": False,
+            "message": "Backend is not connected to the Fabric Data Agent. Check server configuration.",
+            "agent_name": None,
+            "troubleshooting": [
+                "Ensure FABRIC_WORKSPACE_ID and FABRIC_DATAAGENT_ID environment variables are set on the backend App Service.",
+                "Visit the /api/debug endpoint on the backend for full diagnostics.",
+            ],
+        }
+
+    workspace_id = fabric_client.workspace_id
+    agent_name = fabric_client.dataagent_name
+
+    # Quick GET to see if the agent is reachable and in a queryable state
+    try:
+        token = fabric_client._get_token()
+        agent_url = (
+            f"https://api.fabric.microsoft.com/v1"
+            f"/workspaces/{workspace_id}"
+            f"/dataAgents/{fabric_client.dataagent_id}"
+        )
+        resp = _requests.get(
+            agent_url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            timeout=15,
+        )
+
+        if resp.ok:
+            data = resp.json()
+            raw_state = (
+                data.get("state")
+                or data.get("status")
+                or data.get("publishState")
+                or "unknown"
+            )
+            if str(raw_state).lower() in ("draft", "unpublished", "inactive"):
+                return {
+                    "ready": False,
+                    "message": f"The AI Agent '{agent_name}' is in '{raw_state}' state and must be published before it can answer queries.",
+                    "agent_name": agent_name,
+                    "troubleshooting": [
+                        f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
+                        "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
+                        "Visit the /api/debug endpoint on the backend for full diagnostics.",
+                    ],
+                }
+            return {
+                "ready": True,
+                "message": f"AI Agent '{agent_name}' is ready.",
+                "agent_name": agent_name,
+                "troubleshooting": [],
+            }
+        else:
+            return {
+                "ready": False,
+                "message": f"Cannot reach the AI Agent (HTTP {resp.status_code}). The agent may not be published or the backend identity lacks workspace access.",
+                "agent_name": agent_name,
+                "troubleshooting": [
+                    f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
+                    "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
+                    "Visit the /api/debug endpoint on the backend for full diagnostics.",
+                ],
+            }
+    except Exception as exc:
+        logger.warning("Status check failed: %s", exc)
+        return {
+            "ready": False,
+            "message": f"Could not verify AI Agent status: {str(exc)[:200]}",
+            "agent_name": agent_name,
+            "troubleshooting": [
+                "The backend could not connect to the Fabric API. Check network connectivity and credentials.",
+                "Visit the /api/debug endpoint on the backend for full diagnostics.",
+            ],
+        }
+
 @app.get("/api/debug")
 async def debug() -> Dict[str, Any]:
     """
