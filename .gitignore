@@ -36,3 +36,6 @@ Thumbs.db
 
 # Bicep
 *.bicepparam
+
+# Claude Code internal files
+.claude/
