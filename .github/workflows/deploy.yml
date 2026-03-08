@@ -485,6 +485,29 @@ jobs:
             echo "✓ Agent is in '$AGENT_STATE' state — should be queryable."
           fi
 
+          # Probe the query endpoint directly — the metadata endpoint can
+          # return 200 while the query endpoint returns 404 if the agent
+          # is not in a fully published/queryable state.
+          echo ""
+          echo "Probing query endpoint..."
+          QUERY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $FABRIC_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"userMessage":"test connectivity"}' \
+            "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/dataAgents/$DATAAGENT_ID/query" 2>/dev/null || echo "000")
+
+          echo "Query endpoint returned HTTP $QUERY_STATUS"
+          if [ "$QUERY_STATUS" = "404" ]; then
+            echo "⚠️  Query endpoint returned 404 — agent is NOT queryable."
+            echo "   The smoke test chat check will likely fail."
+            echo "   This usually means the agent needs to be Published in the Fabric portal."
+          elif [ "$QUERY_STATUS" = "000" ]; then
+            echo "⚠️  Could not reach the query endpoint."
+          else
+            echo "✓ Query endpoint is reachable (HTTP $QUERY_STATUS)."
+          fi
+
       # --- Smoke Test (optional - runs against deployed apps) ---
       - name: Post-Deployment Smoke Test
         continue-on-error: true
