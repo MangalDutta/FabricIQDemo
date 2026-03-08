@@ -1304,10 +1304,13 @@ def publish_dataagent(
                         f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
                         f"/dataAgents/{agent_id}/query"
                     )
+                    probe_headers = {
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    }
                     probe_resp = requests.post(
                         probe_url,
-                        headers={"Authorization": f"Bearer {token}",
-                                 "Content-Type": "application/json"},
+                        headers=probe_headers,
                         json={"userMessage": "test"},
                         timeout=30,
                     )
@@ -1322,8 +1325,8 @@ def publish_dataagent(
                             "   ║                                                          ║\n"
                             "   ║  To fix:                                                 ║\n"
                             "   ║  1. Open the Fabric portal:                              ║\n"
-                            f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}\n"
-                            f"   ║  2. Open the agent '{agent_name}'                       ║\n"
+                            f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}  ║\n"
+                            f"   ║  2. Open the agent '{agent_name}'                            ║\n"
                             "   ║  3. Click 'Publish' in the top ribbon                   ║\n"
                             "   ╚══════════════════════════════════════════════════════════╝\n"
                         )
