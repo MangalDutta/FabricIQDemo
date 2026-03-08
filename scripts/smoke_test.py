@@ -88,29 +88,73 @@ def check_chat_api(
         preview = answer[:120] + ("…" if len(answer) > 120 else "")
         return True, f'Got answer ({len(answer)} chars): "{preview}"'
     if resp.status_code == 503:
+        # Try to get the actual detail from the response body
+        try:
+            detail = resp.json().get("detail", "")
+            if isinstance(detail, dict):
+                detail = detail.get("message", str(detail))
+        except Exception:
+            detail = resp.text[:200]
         return (
             False,
-            "503 – Fabric Data Agent not configured yet. "
-            "Set FABRIC_WORKSPACE_ID + FABRIC_DATAAGENT_ID "
-            "in App Service settings.",
+            f"503 – {detail or 'Backend not ready (Fabric agent may not be configured yet)'}",
         )
     return False, f"HTTP {resp.status_code} – {resp.text[:200]}"
 
 
-def check_cors_headers(backend_url: str, timeout: int) -> Tuple[bool, str]:
+def check_cors_headers(backend_url: str, frontend_url: str, timeout: int) -> Tuple[bool, str]:
+    """
+    Test CORS by sending an OPTIONS preflight with the frontend's actual origin.
+    Using http://localhost:5173 would always fail when the backend is configured
+    to only allow the real frontend URL.
+    """
+    # Use the real frontend URL as Origin (matches the CORS_ALLOWED_ORIGINS setting).
+    # Fall back to localhost only if no frontend URL was supplied.
+    origin = frontend_url.rstrip("/") if frontend_url else "http://localhost:5173"
+
     url = f"{backend_url.rstrip('/')}/health"
     resp = requests.options(
         url,
         headers={
-            "Origin": "http://localhost:5173",
+            "Origin": origin,
             "Access-Control-Request-Method": "GET",
         },
         timeout=timeout,
     )
     cors = resp.headers.get("Access-Control-Allow-Origin", "")
     if cors:
-        return True, f"CORS origin header: {cors}"
-    return False, "No Access-Control-Allow-Origin header found"
+        return True, f"CORS origin header: {cors}  (tested origin: {origin})"
+    return False, (
+        f"No Access-Control-Allow-Origin header found  "
+        f"(tested origin: {origin}, HTTP {resp.status_code})"
+    )
+
+
+def wait_for_backend(backend_url: str, timeout: int, max_wait: int) -> bool:
+    """
+    Poll /health until it returns 200 or max_wait seconds have elapsed.
+    Returns True if the backend became healthy within the time limit.
+    Replaces a blind time.sleep() that often finishes before the App Service
+    container has actually restarted with updated env vars.
+    """
+    url = f"{backend_url.rstrip('/')}/health"
+    deadline = time.time() + max_wait
+    attempt = 0
+    while time.time() < deadline:
+        attempt += 1
+        try:
+            resp = requests.get(url, timeout=timeout)
+            if resp.status_code == 200:
+                elapsed = int(deadline - max_wait - time.time() + max_wait)
+                print(f"  Backend healthy after ~{attempt * 5}s (attempt {attempt})")
+                return True
+        except Exception:
+            pass
+        remaining = int(deadline - time.time())
+        if remaining > 0:
+            print(f"  Not ready yet — retrying ({remaining}s remaining)…")
+            time.sleep(5)
+    return False
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -145,13 +189,19 @@ def main() -> None:
         "--wait-for-warmup",
         type=int,
         default=0,
-        help="Seconds to wait before starting tests (App Service cold-start)",
+        help=(
+            "Maximum seconds to poll /health waiting for App Service warm-up "
+            "(default 0 = no wait).  Replaces a blind sleep — polling stops "
+            "as soon as the backend responds 200."
+        ),
     )
     args = parser.parse_args()
 
     if args.wait_for_warmup > 0:
-        print(f"⏳ Waiting {args.wait_for_warmup}s for App Service warm-up...")
-        time.sleep(args.wait_for_warmup)
+        print(f"⏳ Waiting up to {args.wait_for_warmup}s for App Service warm-up (polling /health)…")
+        ready = wait_for_backend(args.backend, timeout=10, max_wait=args.wait_for_warmup)
+        if not ready:
+            print(f"  {WARN} Backend did not respond within {args.wait_for_warmup}s — running checks anyway")
 
     print("=" * 62)
     print("🔍 Customer360 Smoke Test")
@@ -177,7 +227,7 @@ def main() -> None:
     )
     _check(
         "CORS headers",
-        lambda: check_cors_headers(args.backend, args.timeout),
+        lambda: check_cors_headers(args.backend, args.frontend, args.timeout),
         results,
     )
 

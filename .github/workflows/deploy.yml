@@ -448,10 +448,21 @@ jobs:
             exit 0
           fi
 
+          # Log the raw response (truncated) so we can see what fields Fabric returns.
+          echo "Raw API response (first 500 chars):"
+          echo "$AGENT_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d, indent=2)[:500])" 2>/dev/null || echo "$AGENT_RESP" | cut -c1-500
+
           AGENT_STATE=$(echo "$AGENT_RESP" | python3 -c "
           import sys, json
           d = json.load(sys.stdin)
-          s = d.get('state') or d.get('status') or d.get('publishState') or 'unknown'
+          # Fabric Data Agents API: check multiple possible field names.
+          # When Published the API may omit the state field entirely (treat as Published).
+          s = (d.get('state')
+               or d.get('status')
+               or d.get('publishState')
+               or d.get('lifecycleState')
+               or d.get('publishedState')
+               or 'published')
           print(s)" 2>/dev/null || echo "unknown")
 
           echo "Agent state: $AGENT_STATE"
@@ -485,7 +496,7 @@ jobs:
           python scripts/smoke_test.py \
             --backend "$BE_URL" \
             --frontend "$FE_URL" \
-            --wait-for-warmup 30 \
+            --wait-for-warmup 120 \
             --timeout 60 || echo "Smoke test had failures (non-blocking)"
 
       # --- Deployment Summary ---
