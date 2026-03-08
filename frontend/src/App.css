@@ -333,3 +333,20 @@ body {
 .inline-link:hover {
   color: #5a6fd6;
 }
+
+/* ── Power BI iframe fallback banner ────────────────────────────────────── */
+
+.powerbi-fallback-banner {
+  padding: 0.5rem 1rem;
+  background: #fff8e1;
+  border-bottom: 1px solid #ffe082;
+  font-size: 0.82rem;
+  color: #5d4037;
+  line-height: 1.5;
+}
+
+.small-text {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.5;
+}

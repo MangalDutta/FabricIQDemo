@@ -42,6 +42,8 @@ interface PbiEmbedState {
   loading: boolean;
   config: models.IReportEmbedConfiguration | null;
   error: string;
+  /** Fallback plain URL — used when embed token generation fails */
+  fallbackUrl: string;
 }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
@@ -61,6 +63,7 @@ const App: React.FC = () => {
     loading: true,
     config: null,
     error: '',
+    fallbackUrl: '',
   });
 
   // Auto-publish state — tracks an in-flight /api/publish-agent call
@@ -98,7 +101,7 @@ const App: React.FC = () => {
   // the browser blocks login-page redirects inside a plain <iframe>.
   const fetchPbiToken = useCallback(async () => {
     if (!BACKEND_URL) {
-      setPbi({ loading: false, config: null, error: 'Backend URL not configured.' });
+      setPbi({ loading: false, config: null, error: 'Backend URL not configured.', fallbackUrl: '' });
       return;
     }
     setPbi(prev => ({ ...prev, loading: true, error: '' }));
@@ -109,6 +112,7 @@ const App: React.FC = () => {
       setPbi({
         loading: false,
         error: '',
+        fallbackUrl: '',
         config: {
           type: 'report',
           id: report_id,
@@ -131,7 +135,20 @@ const App: React.FC = () => {
           ? detail
           : 'Could not load the Power BI dashboard. ' +
             (err.message || 'Check backend logs for details.');
-      setPbi({ loading: false, config: null, error: msg });
+
+      // Fetch the raw embed URL from /api/config to use as a plain-iframe fallback.
+      // This lets users who are already signed into Power BI in their browser
+      // still see the report even when embed token generation is unavailable
+      // (e.g. "Allow service principals to use Power BI APIs" not yet enabled).
+      let fallbackUrl = '';
+      try {
+        const cfgResp = await axios.get(`${BACKEND_URL}/api/config`, { timeout: 8_000 });
+        fallbackUrl = cfgResp.data?.powerbi_report_url || '';
+      } catch {
+        // silently ignore — fallback URL is optional
+      }
+
+      setPbi({ loading: false, config: null, error: msg, fallbackUrl });
     }
   }, []);
 
@@ -248,7 +265,20 @@ const App: React.FC = () => {
             (steps.length > 0
               ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
               : detail.message || 'Please check the backend /api/debug endpoint for details.');
-          checkAgentStatus();
+
+          // Directly mark agent as not-ready so the warning banner appears immediately.
+          // We do NOT re-call checkAgentStatus() here because the /api/status endpoint
+          // may still return "ready" (it uses a lightweight probe that can lag behind
+          // the actual query endpoint state on a freshly deployed agent).
+          setAgentStatus(prev => ({
+            ready: false,
+            message:
+              typeof detail.message === 'string'
+                ? detail.message
+                : (prev?.message || 'The AI Agent is not ready yet. Please publish it in the Fabric portal.'),
+            agent_name: prev?.agent_name ?? null,
+            troubleshooting: steps.length > 0 ? steps : (prev?.troubleshooting ?? []),
+          }));
         } else {
           errorText = `Error: ${
             typeof detail === 'string' ? detail : error.message || 'Failed to get response'
@@ -486,24 +516,58 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {!pbi.loading && pbi.error && (
+        {!pbi.loading && pbi.error && !pbi.fallbackUrl && (
           <div className="powerbi-placeholder">
             <p style={{ color: '#e74c3c' }}>⚠️ {pbi.error}</p>
             <p className="small-text" style={{ marginTop: '8px' }}>
-              If the error mentions "Allow service principals to use Power BI APIs", a Power BI
-              admin must enable that setting in the{' '}
+              A Power BI admin must enable{' '}
+              <strong>"Allow service principals to use Power BI APIs"</strong> in the{' '}
               <a
                 href="https://app.powerbi.com/admin-portal/tenantSettings"
                 target="_blank"
                 rel="noreferrer"
+                className="inline-link"
               >
                 Power BI Admin Portal → Tenant Settings
-              </a>
-              .
+              </a>{' '}
+              for the embedded dashboard to load automatically.
             </p>
             <button className="retry-btn" style={{ marginTop: '12px' }} onClick={fetchPbiToken}>
               🔄 Retry
             </button>
+          </div>
+        )}
+
+        {/* Fallback: when embed token fails but we have the plain URL, show a
+            regular iframe. Works if the user is already signed into Power BI
+            in this browser — no admin setting required. */}
+        {!pbi.loading && pbi.error && pbi.fallbackUrl && (
+          <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+            <div className="powerbi-fallback-banner">
+              ⚠️ Embedded token unavailable — showing in browser sign-in mode.{' '}
+              <a
+                href="https://app.powerbi.com/admin-portal/tenantSettings"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-link"
+              >
+                Enable service principal API access
+              </a>{' '}
+              for seamless embedding.{' '}
+              <button
+                className="retry-btn"
+                style={{ display: 'inline', marginTop: 0, marginLeft: '4px' }}
+                onClick={fetchPbiToken}
+              >
+                🔄 Retry token
+              </button>
+            </div>
+            <iframe
+              src={pbi.fallbackUrl}
+              className="powerbi-iframe"
+              title="Customer 360 Dashboard"
+              allowFullScreen
+            />
           </div>
         )}
 

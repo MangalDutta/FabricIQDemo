@@ -207,7 +207,10 @@ async def status() -> Dict[str, Any]:
     workspace_id = fabric_client.workspace_id
     agent_name = fabric_client.dataagent_name
 
-    # Quick GET to see if the agent is reachable and in a queryable state
+    # ── Step 1: GET agent metadata to check state field ──────────────────────
+    # NOTE: The Fabric Data Agent API often omits the state field entirely when
+    # the agent is Published.  An absent state field does NOT mean "ready" —
+    # we must probe the query endpoint to know for sure.
     try:
         token = fabric_client._get_token()
         agent_url = (
@@ -221,35 +224,13 @@ async def status() -> Dict[str, Any]:
             timeout=15,
         )
 
-        if resp.ok:
-            data = resp.json()
-            raw_state = (
-                data.get("state")
-                or data.get("status")
-                or data.get("publishState")
-                or "unknown"
-            )
-            if str(raw_state).lower() in ("draft", "unpublished", "inactive"):
-                return {
-                    "ready": False,
-                    "message": f"The AI Agent '{agent_name}' is in '{raw_state}' state and must be published before it can answer queries.",
-                    "agent_name": agent_name,
-                    "troubleshooting": [
-                        f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
-                        "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
-                        "Visit the /api/debug endpoint on the backend for full diagnostics.",
-                    ],
-                }
-            return {
-                "ready": True,
-                "message": f"AI Agent '{agent_name}' is ready.",
-                "agent_name": agent_name,
-                "troubleshooting": [],
-            }
-        else:
+        if not resp.ok:
             return {
                 "ready": False,
-                "message": f"Cannot reach the AI Agent (HTTP {resp.status_code}). The agent may not be published or the backend identity lacks workspace access.",
+                "message": (
+                    f"Cannot reach the AI Agent (HTTP {resp.status_code}). "
+                    "The agent may not be published or the backend identity lacks workspace access."
+                ),
                 "agent_name": agent_name,
                 "troubleshooting": [
                     f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
@@ -257,6 +238,86 @@ async def status() -> Dict[str, Any]:
                     "Visit the /api/debug endpoint on the backend for full diagnostics.",
                 ],
             }
+
+        data = resp.json()
+        raw_state = (
+            data.get("state")
+            or data.get("status")
+            or data.get("publishState")
+            or data.get("lifecycleState")
+            or data.get("publishedState")
+            or ""
+        )
+        state_lower = str(raw_state).lower()
+
+        # Explicit Draft/Inactive — fail immediately without probing query endpoint
+        if state_lower in ("draft", "unpublished", "inactive"):
+            return {
+                "ready": False,
+                "message": (
+                    f"The AI Agent '{agent_name}' is in '{raw_state}' state "
+                    "and must be published before it can answer queries."
+                ),
+                "agent_name": agent_name,
+                "troubleshooting": [
+                    f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
+                    "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
+                    "Visit the /api/debug endpoint on the backend for full diagnostics.",
+                ],
+            }
+
+        # ── Step 2: Probe the query endpoint to verify real queryability ──────
+        # The metadata API often returns 200 with no state field whether the agent
+        # is Published OR Draft.  The only reliable check is whether the query
+        # endpoint itself returns non-404.  We send a minimal probe message.
+        query_url = (
+            f"https://api.fabric.microsoft.com/v1"
+            f"/workspaces/{workspace_id}"
+            f"/dataAgents/{fabric_client.dataagent_id}/query"
+        )
+        try:
+            probe = _requests.post(
+                query_url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"userMessage": "status check"},
+                timeout=12,
+            )
+            if probe.status_code == 404:
+                logger.warning(
+                    "Status probe: query endpoint returned 404 — agent is NOT queryable "
+                    "(likely Draft state). workspace=%s agent=%s",
+                    workspace_id, fabric_client.dataagent_id,
+                )
+                return {
+                    "ready": False,
+                    "message": (
+                        f"The AI Agent '{agent_name}' is not queryable yet "
+                        "(query endpoint returned 404, typically meaning the agent is in Draft state). "
+                        "Please publish the agent in the Fabric portal."
+                    ),
+                    "agent_name": agent_name,
+                    "troubleshooting": [
+                        f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
+                        "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
+                        "Visit the /api/debug endpoint on the backend for full diagnostics.",
+                    ],
+                }
+            # Any non-404 response (200, 400, 500) means the endpoint is reachable
+            logger.info(
+                "Status probe: query endpoint returned HTTP %d — agent is reachable.",
+                probe.status_code,
+            )
+        except Exception as probe_exc:
+            # Probe timed out or failed — don't block status; log and continue
+            logger.warning("Status query probe failed (non-fatal): %s", probe_exc)
+
+        return {
+            "ready": True,
+            "message": f"AI Agent '{agent_name}' is ready.",
+            "agent_name": agent_name,
+            "troubleshooting": [],
+        }
+
     except Exception as exc:
         logger.warning("Status check failed: %s", exc)
         return {
