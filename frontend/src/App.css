@@ -323,3 +323,13 @@ body {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.inline-link {
+  color: #667eea;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.inline-link:hover {
+  color: #5a6fd6;
+}

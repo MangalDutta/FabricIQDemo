@@ -4,6 +4,25 @@ import { PowerBIEmbed } from 'powerbi-client-react';
 import { models } from 'powerbi-client';
 import './App.css';
 
+/** Renders a string that may contain https:// URLs as mixed text + <a> elements. */
+function TextWithLinks({ text }: { text: string }) {
+  const URL_RE = /(https?:\/\/[^\s)]+)/g;
+  const parts = text.split(URL_RE);
+  return (
+    <>
+      {parts.map((part, i) =>
+        URL_RE.test(part) ? (
+          <a key={i} href={part} target="_blank" rel="noreferrer" className="inline-link">
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 interface Message {
   role: 'user' | 'assistant';
   content: string;
@@ -43,6 +62,13 @@ const App: React.FC = () => {
     config: null,
     error: '',
   });
+
+  // Auto-publish state — tracks an in-flight /api/publish-agent call
+  const [publishState, setPublishState] = useState<{
+    loading: boolean;
+    result: string;
+    portalUrl: string;
+  }>({ loading: false, result: '', portalUrl: '' });
 
   // ── Agent status check ──────────────────────────────────────────────────────
   const checkAgentStatus = useCallback(async () => {
@@ -108,6 +134,31 @@ const App: React.FC = () => {
       setPbi({ loading: false, config: null, error: msg });
     }
   }, []);
+
+  // ── Try auto-publish the Fabric Data Agent ─────────────────────────────────
+  // Calls the backend /api/publish-agent endpoint which uses the App Service
+  // Managed Identity to attempt the Fabric publish API.  If the API is not yet
+  // available on the tenant it returns a direct portal URL so the user can
+  // publish in one click.
+  const tryPublishAgent = useCallback(async () => {
+    setPublishState({ loading: true, result: '', portalUrl: '' });
+    try {
+      const resp = await axios.post(`${BACKEND_URL}/api/publish-agent`, {}, { timeout: 70_000 });
+      const { published, message, portal_url } = resp.data;
+      setPublishState({ loading: false, result: message, portalUrl: portal_url || '' });
+      if (published) {
+        // Re-check status so the banner clears if the agent is now ready
+        setTimeout(checkAgentStatus, 2000);
+      }
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      setPublishState({
+        loading: false,
+        result: typeof detail === 'string' ? detail : 'Auto-publish request failed. ' + (err.message || ''),
+        portalUrl: '',
+      });
+    }
+  }, [checkAgentStatus]);
 
   // ── Startup effects ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -258,12 +309,47 @@ const App: React.FC = () => {
               <div className="status-banner-text">
                 <strong>AI Agent Not Ready</strong>
                 <p>{agentStatus!.message}</p>
+
+                {/* Auto-publish button — tries to publish the agent via API */}
+                <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    className="retry-btn"
+                    onClick={tryPublishAgent}
+                    disabled={publishState.loading}
+                    title="Attempt to publish the Fabric Data Agent using the backend Managed Identity"
+                  >
+                    {publishState.loading ? '⏳ Publishing…' : '🚀 Try Auto-Publish Agent'}
+                  </button>
+                </div>
+
+                {/* Result of last publish attempt */}
+                {publishState.result && (
+                  <p style={{ marginTop: '6px', fontSize: '0.85em' }}>
+                    <TextWithLinks text={publishState.result} />
+                    {publishState.portalUrl && (
+                      <>
+                        {' '}—{' '}
+                        <a
+                          href={publishState.portalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-link"
+                        >
+                          Open in Fabric portal →
+                        </a>
+                      </>
+                    )}
+                  </p>
+                )}
+
                 {agentStatus!.troubleshooting.length > 0 && (
-                  <details className="status-banner-details">
-                    <summary>Setup instructions (admin)</summary>
+                  <details className="status-banner-details" style={{ marginTop: '8px' }}>
+                    <summary>Manual setup instructions</summary>
                     <ol>
                       {agentStatus!.troubleshooting.map((step, i) => (
-                        <li key={i}>{step}</li>
+                        <li key={i}>
+                          <TextWithLinks text={step} />
+                        </li>
                       ))}
                     </ol>
                   </details>
@@ -316,7 +402,14 @@ const App: React.FC = () => {
               </div>
               <div className="message-content">
                 <div className="message-text" style={{ whiteSpace: 'pre-wrap' }}>
-                  {msg.content}
+                  {msg.isError
+                    ? msg.content.split('\n').map((line, li) => (
+                        <span key={li}>
+                          <TextWithLinks text={line} />
+                          {'\n'}
+                        </span>
+                      ))
+                    : msg.content}
                 </div>
                 {msg.isError && msg.failedMessage && (
                   <button

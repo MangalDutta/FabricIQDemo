@@ -373,6 +373,115 @@ async def debug() -> Dict[str, Any]:
     return result
 
 
+@app.post("/api/publish-agent")
+async def publish_agent() -> Dict[str, Any]:
+    """
+    Attempt to programmatically publish the Fabric Data Agent using the
+    backend's Managed Identity (the same identity that created the agent).
+
+    The Fabric publish API is in preview and may return 404 on some tenants.
+    If every endpoint fails this returns a clear manual-publish URL so the
+    user can do it in one click from the Fabric portal.
+
+    Returns:
+        {
+            "published":  bool,
+            "method":     str,   # which API endpoint succeeded, or "manual_required"
+            "agent_state": str,  # state after attempt
+            "portal_url": str,   # direct link to open the agent in Fabric
+            "message":    str
+        }
+    """
+    if not fabric_client:
+        raise HTTPException(status_code=503, detail="Fabric client not configured.")
+
+    workspace_id = fabric_client.workspace_id
+    agent_id = fabric_client.dataagent_id
+    agent_name = fabric_client.dataagent_name
+    portal_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
+
+    try:
+        token = fabric_client._get_token()
+    except Exception as ex:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not acquire Fabric token: {str(ex)[:200]}",
+        )
+
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Try every known publish endpoint variation (Fabric API is in preview and
+    # the correct endpoint varies by API version / tenant).
+    publish_endpoints = [
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataAgents/{agent_id}/publish",
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataAgents/{agent_id}/activate",
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/items/{agent_id}/publish",
+        f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/items/{agent_id}/deploy",
+    ]
+
+    published_via = None
+    for url in publish_endpoints:
+        try:
+            resp = _requests.post(url, headers=headers, json={}, timeout=60)
+            if resp.status_code in (200, 201, 204):
+                published_via = url.split("/")[-1]
+                break
+            if resp.status_code == 202:
+                published_via = url.split("/")[-1] + " (async)"
+                break
+            if resp.status_code == 409:
+                # Already published
+                published_via = "already_published"
+                break
+            # 404 = endpoint not available in this API version — try next
+        except Exception as exc:
+            logger.warning("Publish attempt via %s failed: %s", url, exc)
+
+    # Verify the actual agent state after the attempt
+    agent_state = "unknown"
+    try:
+        check = _requests.get(
+            f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataAgents/{agent_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=20,
+        )
+        if check.ok:
+            d = check.json()
+            agent_state = (
+                d.get("state") or d.get("status") or d.get("publishState") or "unknown"
+            )
+        else:
+            logger.warning("Post-publish state check returned HTTP %d", check.status_code)
+    except Exception as exc:
+        logger.warning("Post-publish state check failed: %s", exc)
+
+    state_lower = str(agent_state).lower()
+    is_queryable = state_lower not in ("draft", "unpublished", "inactive", "unknown")
+
+    if is_queryable:
+        return {
+            "published": True,
+            "method": published_via or "already_active",
+            "agent_state": agent_state,
+            "portal_url": portal_url,
+            "message": f"Agent '{agent_name}' is now in '{agent_state}' state and ready to answer queries.",
+        }
+
+    # API publish didn't work — manual action required
+    return {
+        "published": False,
+        "method": "manual_required",
+        "agent_state": agent_state,
+        "portal_url": portal_url,
+        "message": (
+            f"Could not publish the agent via API (Fabric publish endpoint is in preview "
+            f"and not yet available on this tenant). "
+            f"Please publish manually: open {portal_url}, find '{agent_name}', "
+            f"and click 'Publish' in the top ribbon."
+        ),
+    }
+
+
 @app.post("/api/reset")
 async def reset_conversation(request: Request) -> Dict[str, str]:
     """Reset the conversation history for a user so the next message starts fresh."""
