@@ -281,29 +281,44 @@ jobs:
 
       # --- Step 5: Build frontend AFTER Fabric setup so Power BI URL is available ---
       - name: Build and push frontend Docker image
-        uses: azure/cli@v2
-        with:
-          inlineScript: |
-            set -e
-            BE_URL="https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
+        # Use a plain `run:` step (not azure/cli@v2) so that the host runner's
+        # docker daemon is available.  az acr build routes builds through the ACR
+        # task runner, which executes multi-stage Dockerfiles via an unquoted
+        # /bin/sh one-liner; the second stage causes ".: filename argument required"
+        # regardless of build-arg values.  Building locally and pushing directly
+        # to ACR avoids the task runner entirely.
+        run: |
+          set -e
+          BE_URL="https://${{ steps.outputs.outputs.backend_app }}.azurewebsites.net"
 
-            PBI_URL="${{ inputs.powerbi_report_url }}"
-            if [ -z "$PBI_URL" ]; then
-              PBI_URL="${{ steps.fabric_setup.outputs.powerbi_embed_url }}"
-            fi
+          PBI_URL="${{ inputs.powerbi_report_url }}"
+          if [ -z "$PBI_URL" ]; then
+            PBI_URL="${{ steps.fabric_setup.outputs.powerbi_embed_url }}"
+          fi
 
-            echo "Building frontend image..."
-            echo "  VITE_BACKEND_URL        = $BE_URL"
-            echo "  VITE_POWERBI_REPORT_URL = $PBI_URL"
+          ACR="${{ steps.outputs.outputs.acr_name }}"
 
-            az acr build \
-              --registry "${{ steps.outputs.outputs.acr_name }}" \
-              --image fabric-customer360-frontend:latest \
-              --file frontend/Dockerfile \
-              --build-arg VITE_BACKEND_URL="$BE_URL" \
-              --build-arg VITE_POWERBI_REPORT_URL="$PBI_URL" \
-              frontend
-            echo "Frontend image pushed"
+          echo "Building frontend image..."
+          echo "  VITE_BACKEND_URL        = $BE_URL"
+          echo "  VITE_POWERBI_REPORT_URL = $PBI_URL"
+
+          # Write env vars to .env.production so Vite picks them up natively
+          # (avoids passing URLs with '&' as --build-arg values).
+          printf 'VITE_BACKEND_URL=%s\nVITE_POWERBI_REPORT_URL=%s\n' \
+            "$BE_URL" "$PBI_URL" > frontend/.env.production
+
+          # Authenticate the runner's docker daemon with ACR.
+          # azure/login@v2 (OIDC) already ran; credentials are in ~/.azure/
+          # and az commands work in plain run: steps.
+          az acr login --name "$ACR"
+
+          docker build \
+            -f frontend/Dockerfile \
+            -t "${ACR}.azurecr.io/fabric-customer360-frontend:latest" \
+            frontend
+
+          docker push "${ACR}.azurecr.io/fabric-customer360-frontend:latest"
+          echo "Frontend image pushed"
 
       # --- Step 6: Configure backend App Service ---
       - name: Configure backend App Service

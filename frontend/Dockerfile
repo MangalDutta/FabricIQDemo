@@ -1,16 +1,16 @@
 # Multi-stage build
 FROM node:20-alpine AS builder
 
-ARG VITE_BACKEND_URL=""
-ARG VITE_POWERBI_REPORT_URL=""
+# VITE_BACKEND_URL and VITE_POWERBI_REPORT_URL are injected via .env.production
+# written into the build context by the CI workflow before calling az acr build.
+# This avoids passing --build-arg values with '&' through the ACR task runner's
+# unquoted /bin/sh shell, which caused ".: filename argument required" failures.
 
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
 COPY . .
-ENV VITE_BACKEND_URL=$VITE_BACKEND_URL
-ENV VITE_POWERBI_REPORT_URL=$VITE_POWERBI_REPORT_URL
 RUN npm run build
 
 FROM node:20-alpine AS production
