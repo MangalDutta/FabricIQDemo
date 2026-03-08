@@ -94,6 +94,19 @@ body {
   color: white;
 }
 
+.sample-question-btn--disabled,
+.sample-question-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #e8e8e8;
+}
+
+.sample-question-btn--disabled:hover,
+.sample-question-btn:disabled:hover {
+  background: #e8e8e8;
+  color: inherit;
+}
+
 .message {
   display: flex;
   gap: 0.75rem;

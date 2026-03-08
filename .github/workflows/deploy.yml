@@ -341,10 +341,18 @@ jobs:
               PBI_URL="${{ steps.fabric_setup.outputs.powerbi_embed_url }}"
             fi
 
+            # Extract reportId and groupId from the embed URL so the backend
+            # /api/powerbi-token endpoint can also read them as discrete env vars
+            # (the backend also parses them from POWERBI_REPORT_URL as a fallback).
+            PBI_REPORT_ID=$(echo "$PBI_URL" | grep -oP '(?<=reportId=)[^&]+' || true)
+            PBI_GROUP_ID=$(echo  "$PBI_URL" | grep -oP '(?<=groupId=)[^&]+'  || true)
+
             echo "Configuring backend ($BE)..."
             echo "  FABRIC_WORKSPACE_ID = $WORKSPACE_ID"
             echo "  FABRIC_DATAAGENT_ID = $DATAAGENT_ID"
             echo "  POWERBI_REPORT_URL  = $PBI_URL"
+            echo "  POWERBI_REPORT_ID   = $PBI_REPORT_ID"
+            echo "  POWERBI_GROUP_ID    = $PBI_GROUP_ID"
 
             ACR_USER=$(az acr credential show --name "$ACR" --query "username" -o tsv)
             ACR_PASS=$(az acr credential show --name "$ACR" --query "passwords[0].value" -o tsv)
@@ -363,6 +371,8 @@ jobs:
                 FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
                 FABRIC_DATAAGENT_NAME="Customer360Agent" \
                 POWERBI_REPORT_URL="$PBI_URL" \
+                POWERBI_REPORT_ID="$PBI_REPORT_ID" \
+                POWERBI_GROUP_ID="$PBI_GROUP_ID" \
                 CORS_ALLOWED_ORIGINS="$FE_URL" \
                 APPLICATIONINSIGHTS_CONNECTION_STRING="${{ steps.outputs.outputs.app_insights_cs }}" \
                 WEBSITES_ENABLE_APP_SERVICE_STORAGE="false" \

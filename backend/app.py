@@ -4,9 +4,11 @@ import base64
 import json
 import logging
 import os
+from urllib.parse import urlparse, parse_qs
 from typing import Any, Dict
 
 import requests as _requests
+from azure.identity import DefaultAzureCredential
 
 from fabric_client import AgentNotReadyError, FabricClient
 
@@ -35,6 +37,13 @@ except Exception as ex:
     logger.error(f"Failed to initialize Fabric client: {ex}")
     fabric_client = None
 
+# Shared credential for Power BI token endpoint (reuses the same Managed Identity)
+try:
+    _pbi_credential = DefaultAzureCredential()
+except Exception as ex:
+    logger.warning(f"DefaultAzureCredential init for Power BI failed: {ex}")
+    _pbi_credential = None
+
 @app.get("/")
 async def root() -> Dict[str, str]:
     return {
@@ -56,6 +65,115 @@ async def config() -> Dict[str, str]:
     """
     return {
         "powerbi_report_url": os.environ.get("POWERBI_REPORT_URL", ""),
+    }
+
+
+@app.get("/api/powerbi-token")
+async def get_powerbi_token() -> Dict[str, Any]:
+    """
+    Generate a Power BI embed token using the backend's Managed Identity.
+
+    This allows the frontend to embed the report without requiring end-users
+    to be signed into Power BI in their browser — fixing the
+    "app.powerbi.com refused to connect" iframe auth-redirect failure.
+
+    Requirements:
+      1. Backend Managed Identity must be a Fabric workspace Contributor
+         (handled automatically by fabric_setup.py during deployment).
+      2. Azure AD tenant must allow service principals to use Power BI APIs:
+         Power BI Admin Portal → Tenant Settings →
+         "Allow service principals to use Power BI APIs" → Enabled.
+    """
+    report_url = os.environ.get("POWERBI_REPORT_URL", "")
+    if not report_url:
+        raise HTTPException(
+            status_code=503,
+            detail="POWERBI_REPORT_URL is not configured on the backend App Service.",
+        )
+
+    # Parse reportId and groupId from the embed URL
+    parsed = urlparse(report_url)
+    params = parse_qs(parsed.query)
+    report_id = params.get("reportId", [""])[0]
+    group_id = params.get("groupId", [""])[0]
+
+    if not report_id or not group_id:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not parse reportId/groupId from POWERBI_REPORT_URL: {report_url[:120]}",
+        )
+
+    if not _pbi_credential:
+        raise HTTPException(
+            status_code=503,
+            detail="Managed Identity credential not available. Ensure the App Service has a system-assigned identity.",
+        )
+
+    # Step 1: Acquire AAD access token for the Power BI API scope
+    try:
+        token_obj = _pbi_credential.get_token(
+            "https://analysis.windows.net/powerbi/api/.default"
+        )
+        access_token = token_obj.token
+    except Exception as ex:
+        logger.error("Power BI AAD token acquisition failed: %s", ex)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Could not acquire Power BI access token via Managed Identity: {str(ex)[:250]} "
+                "— Ensure the backend App Service has a system-assigned managed identity enabled."
+            ),
+        )
+
+    # Step 2: Call Power BI REST API to generate a short-lived embed token
+    generate_url = (
+        f"https://api.powerbi.com/v1.0/myorg/groups/{group_id}"
+        f"/reports/{report_id}/GenerateToken"
+    )
+    try:
+        resp = _requests.post(
+            generate_url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"accessLevel": "View"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except _requests.exceptions.HTTPError as ex:
+        http_status = ex.response.status_code if ex.response else 503
+        body = ex.response.text[:300] if ex.response else str(ex)
+        logger.error("GenerateToken HTTP %s: %s", http_status, body)
+        hints = {
+            401: " Ensure the backend Managed Identity is added to the Power BI workspace as Contributor.",
+            403: (
+                " Enable 'Allow service principals to use Power BI APIs' in "
+                "Power BI Admin Portal → Tenant Settings."
+            ),
+        }
+        raise HTTPException(
+            status_code=503,
+            detail=f"Power BI embed token generation failed (HTTP {http_status}).{hints.get(http_status, '')}",
+        )
+    except Exception as ex:
+        logger.error("GenerateToken request failed: %s", ex)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to call Power BI GenerateToken API: {str(ex)[:250]}",
+        )
+
+    embed_url = (
+        f"https://app.powerbi.com/reportEmbed"
+        f"?reportId={report_id}&groupId={group_id}"
+    )
+    return {
+        "embed_token": data.get("token", ""),
+        "embed_url": embed_url,
+        "report_id": report_id,
+        "group_id": group_id,
+        "expiry": data.get("expiration", ""),
     }
 
 

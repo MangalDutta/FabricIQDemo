@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
+import { PowerBIEmbed } from 'powerbi-client-react';
+import { models } from 'powerbi-client';
 import './App.css';
 
 interface Message {
@@ -17,7 +19,14 @@ interface AgentStatus {
   troubleshooting: string[];
 }
 
+interface PbiEmbedState {
+  loading: boolean;
+  config: models.IReportEmbedConfiguration | null;
+  error: string;
+}
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+const CHAT_TIMEOUT_MS = 120_000; // 2 minutes — matches backend Fabric query timeout
 
 const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -26,13 +35,16 @@ const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
-  // Power BI URL: fetched from the backend at runtime so it can be updated
-  // via an App Service setting without rebuilding the Docker image.
-  // Falls back to the build-time env var for local development.
-  const [powerbiReportUrl, setPowerbiReportUrl] = useState<string>(
-    import.meta.env.VITE_POWERBI_REPORT_URL || ''
-  );
 
+  // Power BI embed state — driven by a backend-generated embed token so users
+  // don't need to be signed into Power BI in their browser.
+  const [pbi, setPbi] = useState<PbiEmbedState>({
+    loading: true,
+    config: null,
+    error: '',
+  });
+
+  // ── Agent status check ──────────────────────────────────────────────────────
   const checkAgentStatus = useCallback(async () => {
     if (!BACKEND_URL) {
       setStatusLoading(false);
@@ -53,33 +65,78 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    if (!BACKEND_URL) return;
-    axios
-      .get(`${BACKEND_URL}/api/config`)
-      .then((resp) => {
-        const url: string = resp.data?.powerbi_report_url || '';
-        if (url) setPowerbiReportUrl(url);
-      })
-      .catch(() => {
-        // Config fetch failed — keep the build-time VITE_ value as fallback
+  // ── Power BI embed token fetch ──────────────────────────────────────────────
+  // Fetches a short-lived embed token from the backend using the App Service's
+  // Managed Identity, then renders the report via the Power BI JavaScript SDK.
+  // This avoids the "app.powerbi.com refused to connect" error that occurs when
+  // the browser blocks login-page redirects inside a plain <iframe>.
+  const fetchPbiToken = useCallback(async () => {
+    if (!BACKEND_URL) {
+      setPbi({ loading: false, config: null, error: 'Backend URL not configured.' });
+      return;
+    }
+    setPbi(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const resp = await axios.get(`${BACKEND_URL}/api/powerbi-token`, { timeout: 20_000 });
+      const { embed_token, embed_url, report_id } = resp.data;
+
+      setPbi({
+        loading: false,
+        error: '',
+        config: {
+          type: 'report',
+          id: report_id,
+          embedUrl: embed_url,
+          accessToken: embed_token,
+          tokenType: models.TokenType.Embed,
+          settings: {
+            panes: {
+              filters: { expanded: false, visible: false },
+              pageNavigation: { visible: false },
+            },
+            background: models.BackgroundType.Transparent,
+          },
+        },
       });
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      const msg =
+        typeof detail === 'string'
+          ? detail
+          : 'Could not load the Power BI dashboard. ' +
+            (err.message || 'Check backend logs for details.');
+      setPbi({ loading: false, config: null, error: msg });
+    }
+  }, []);
 
+  // ── Startup effects ─────────────────────────────────────────────────────────
+  useEffect(() => {
     checkAgentStatus();
-  }, [checkAgentStatus]);
+    fetchPbiToken();
+  }, [checkAgentStatus, fetchPbiToken]);
 
+  // Auto-refresh the embed token ~5 minutes before it expires (tokens last 1h).
+  useEffect(() => {
+    if (!pbi.config?.accessToken) return;
+    const REFRESH_MS = 55 * 60 * 1000; // 55 minutes
+    const timer = setTimeout(fetchPbiToken, REFRESH_MS);
+    return () => clearTimeout(timer);
+  }, [pbi.config?.accessToken, fetchPbiToken]);
+
+  // ── Sample questions ────────────────────────────────────────────────────────
   const sampleQuestions = [
     'Top 5 customers by LifetimeValue in Maharashtra',
     'Which customers have ChurnRiskScore above 80?',
     'Show average MonthlyRevenue by State for Karnataka and Tamil Nadu',
     'Count customers by Segment',
-    'List Startup customers in Delhi with LifetimeValue above 50000'
+    'List Startup customers in Delhi with LifetimeValue above 50000',
   ];
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  // ── Conversation reset ──────────────────────────────────────────────────────
   const resetConversation = async () => {
     try {
       await axios.post(`${BACKEND_URL}/api/reset`, { userId: 'web-user' });
@@ -90,6 +147,7 @@ const App: React.FC = () => {
     setInput('');
   };
 
+  // ── Chat ────────────────────────────────────────────────────────────────────
   const sendMessage = async (overrideMessage?: string) => {
     const messageText = overrideMessage || input;
     if (!messageText.trim()) return;
@@ -97,66 +155,73 @@ const App: React.FC = () => {
     const userMessage: Message = {
       role: 'user',
       content: messageText,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
 
     setMessages(prev => [...prev, userMessage]);
     if (!overrideMessage) setInput('');
     setLoading(true);
 
+    // AbortController enforces the same 2-minute timeout as the backend query.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+
     try {
-      const response = await axios.post(`${BACKEND_URL}/api/chat`, {
-        message: messageText,
-        userId: 'web-user'
-      });
+      const response = await axios.post(
+        `${BACKEND_URL}/api/chat`,
+        { message: messageText, userId: 'web-user' },
+        { signal: controller.signal },
+      );
 
       const assistantMessage: Message = {
         role: 'assistant',
         content: response.data.answer || 'No response received.',
-        timestamp: response.data.timestamp
+        timestamp: response.data.timestamp,
       };
-
       setMessages(prev => [...prev, assistantMessage]);
 
-      // If we successfully got a response, refresh status to reflect reality
-      if (agentStatus && !agentStatus.ready) {
-        checkAgentStatus();
-      }
+      // If we got a successful response the agent is working — refresh banner.
+      if (agentStatus && !agentStatus.ready) checkAgentStatus();
     } catch (error: any) {
-      const detail = error.response?.data?.detail;
       let errorText: string;
 
-      if (detail && typeof detail === 'object' && detail.error === 'agent_not_ready') {
-        // Structured error from backend — show troubleshooting steps
-        const steps = (detail.troubleshooting || []) as string[];
+      if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
         errorText =
-          '⚠️ The AI Agent is not ready yet.\n\n' +
-          (steps.length > 0
-            ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
-            : detail.message || 'Please check the backend /api/debug endpoint for details.');
-
-        // Refresh agent status for the banner
-        checkAgentStatus();
+          '⏱️ Request timed out after 2 minutes. The Fabric Data Agent may be under heavy load. Please try again.';
       } else {
-        errorText = `Error: ${typeof detail === 'string' ? detail : error.message || 'Failed to get response'}`;
+        const detail = error.response?.data?.detail;
+        if (detail && typeof detail === 'object' && detail.error === 'agent_not_ready') {
+          const steps = (detail.troubleshooting || []) as string[];
+          errorText =
+            '⚠️ The AI Agent is not ready yet.\n\n' +
+            (steps.length > 0
+              ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
+              : detail.message || 'Please check the backend /api/debug endpoint for details.');
+          checkAgentStatus();
+        } else {
+          errorText = `Error: ${
+            typeof detail === 'string' ? detail : error.message || 'Failed to get response'
+          }`;
+        }
       }
 
-      const errorMessage: Message = {
-        role: 'assistant',
-        content: errorText,
-        timestamp: new Date().toISOString(),
-        isError: true,
-        failedMessage: messageText,
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: errorText,
+          timestamp: new Date().toISOString(),
+          isError: true,
+          failedMessage: messageText,
+        },
+      ]);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
 
-  const retryMessage = (message: string) => {
-    sendMessage(message);
-  };
+  const retryMessage = (message: string) => sendMessage(message);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -165,12 +230,12 @@ const App: React.FC = () => {
     }
   };
 
-  const useSampleQuestion = (question: string) => {
-    setInput(question);
-  };
+  const agentNotReady = !statusLoading && agentStatus && !agentStatus.ready;
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="app-container">
+      {/* ── Left panel: Chat ── */}
       <div className="chat-panel">
         <div className="chat-header">
           <div className="chat-header-content">
@@ -186,25 +251,29 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {!statusLoading && agentStatus && !agentStatus.ready && (
+        {agentNotReady && (
           <div className="status-banner status-banner-warning">
             <div className="status-banner-content">
               <span className="status-banner-icon">⚠️</span>
               <div className="status-banner-text">
                 <strong>AI Agent Not Ready</strong>
-                <p>{agentStatus.message}</p>
-                {agentStatus.troubleshooting.length > 0 && (
+                <p>{agentStatus!.message}</p>
+                {agentStatus!.troubleshooting.length > 0 && (
                   <details className="status-banner-details">
                     <summary>Setup instructions (admin)</summary>
                     <ol>
-                      {agentStatus.troubleshooting.map((step, i) => (
+                      {agentStatus!.troubleshooting.map((step, i) => (
                         <li key={i}>{step}</li>
                       ))}
                     </ol>
                   </details>
                 )}
               </div>
-              <button className="status-banner-refresh" onClick={checkAgentStatus} title="Recheck status">
+              <button
+                className="status-banner-refresh"
+                onClick={checkAgentStatus}
+                title="Recheck status"
+              >
                 🔄
               </button>
             </div>
@@ -220,23 +289,35 @@ const App: React.FC = () => {
                 {sampleQuestions.map((q, idx) => (
                   <button
                     key={idx}
-                    className="sample-question-btn"
-                    onClick={() => useSampleQuestion(q)}
+                    className={`sample-question-btn${agentNotReady ? ' sample-question-btn--disabled' : ''}`}
+                    onClick={() => !agentNotReady && setInput(q)}
+                    disabled={!!agentNotReady}
+                    title={agentNotReady ? 'AI Agent is not ready — see banner above' : ''}
                   >
                     {q}
                   </button>
                 ))}
               </div>
+              {agentNotReady && (
+                <p className="small-text" style={{ color: '#e67e22', marginTop: '8px' }}>
+                  Sample questions are disabled until the AI Agent is ready.
+                </p>
+              )}
             </div>
           )}
 
           {messages.map((msg, idx) => (
-            <div key={idx} className={`message message-${msg.role}${msg.isError ? ' message-error' : ''}`}>
+            <div
+              key={idx}
+              className={`message message-${msg.role}${msg.isError ? ' message-error' : ''}`}
+            >
               <div className="message-avatar">
                 {msg.role === 'user' ? '👤' : msg.isError ? '⚠️' : '🤖'}
               </div>
               <div className="message-content">
-                <div className="message-text" style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                <div className="message-text" style={{ whiteSpace: 'pre-wrap' }}>
+                  {msg.content}
+                </div>
                 {msg.isError && msg.failedMessage && (
                   <button
                     className="retry-btn"
@@ -275,10 +356,10 @@ const App: React.FC = () => {
           <input
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              agentStatus && !agentStatus.ready
+              agentNotReady
                 ? 'AI Agent is not ready — see banner above for details'
                 : 'Ask about customers, churn risk, revenue trends...'
             }
@@ -295,21 +376,46 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {/* ── Right panel: Power BI ── */}
       <div className="powerbi-panel">
         <div className="powerbi-header">
           <h2>📊 Customer 360 Dashboard</h2>
         </div>
-        {powerbiReportUrl ? (
-          <iframe
-            src={powerbiReportUrl}
-            title="Customer 360 Power BI Report"
-            className="powerbi-iframe"
-          />
-        ) : (
+
+        {pbi.loading && (
           <div className="powerbi-placeholder">
-            <p>Power BI report will appear here</p>
-            <p className="small-text">Configure VITE_POWERBI_REPORT_URL to enable</p>
+            <div className="loading-dots">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
+            <p style={{ marginTop: '12px' }}>Loading dashboard…</p>
           </div>
+        )}
+
+        {!pbi.loading && pbi.error && (
+          <div className="powerbi-placeholder">
+            <p style={{ color: '#e74c3c' }}>⚠️ {pbi.error}</p>
+            <p className="small-text" style={{ marginTop: '8px' }}>
+              If the error mentions "Allow service principals to use Power BI APIs", a Power BI
+              admin must enable that setting in the{' '}
+              <a
+                href="https://app.powerbi.com/admin-portal/tenantSettings"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Power BI Admin Portal → Tenant Settings
+              </a>
+              .
+            </p>
+            <button className="retry-btn" style={{ marginTop: '12px' }} onClick={fetchPbiToken}>
+              🔄 Retry
+            </button>
+          </div>
+        )}
+
+        {!pbi.loading && !pbi.error && pbi.config && (
+          <PowerBIEmbed embedConfig={pbi.config} cssClassName="powerbi-iframe" />
         )}
       </div>
     </div>
