@@ -319,17 +319,21 @@ def add_workspace_member(
         if resp.status_code in (200, 201):
             print(f"   ✓ Service principal added to workspace as {role}.")
             return
-        if resp.status_code == 400:
+        if resp.status_code in (400, 409):
             try:
                 body = resp.json()
                 err_code = body.get("errorCode", "")
                 err_msg = body.get("message", "")
             except Exception:
                 err_code, err_msg = "", ""
-            if "AlreadyExists" in err_code or "already" in err_msg.lower():
+            if (
+                "AlreadyExists" in err_code
+                or "AlreadyHas" in err_code
+                or "already" in err_msg.lower()
+            ):
                 print(f"   ✓ Service principal is already a workspace member ({err_code or 'OK'}).")
                 return
-            print(f"   ⚠️  roleAssignments returned 400: {err_code} – {err_msg[:200]}")
+            print(f"   ⚠️  roleAssignments returned {resp.status_code}: {err_code} – {err_msg[:200]}")
             return
         print(
             f"   ⚠️  roleAssignments returned HTTP {resp.status_code}: {resp.text[:300]} "
@@ -720,6 +724,7 @@ def get_or_create_dataagent(
     dataagent_name: str,
     lakehouse_id: str,
     token: str,
+    table_name: str = "",
 ) -> str:
     """
     Creates (or finds) a Fabric Data Agent in the workspace and links it to the
@@ -756,18 +761,33 @@ def get_or_create_dataagent(
                     break  # Exit search loop; fall through to creation below
 
             print(f"📦 Creating Data Agent: {dataagent_name}")
+            # Build data source config — include table selection when
+            # table_name is provided so the agent is fully configured
+            # on creation and no follow-up PATCH is needed (PATCH moves
+            # Published agents to Draft state).
+            data_source: Dict[str, Any] = {
+                "type": "Lakehouse",
+                "workspaceId": workspace_id,
+                "itemId": lakehouse_id,
+            }
+            if table_name:
+                data_source["selectedObjects"] = [
+                    {"schema": "dbo", "name": table_name, "objectType": "Table"}
+                ]
+            create_config: Dict[str, Any] = {
+                "dataSources": [data_source],
+            }
+            if table_name:
+                create_config["instructions"] = (
+                    f"You are a customer analytics assistant. "
+                    f"Answer questions about the '{table_name}' table in the "
+                    f"Customer360 Lakehouse. Provide insights about customer "
+                    f"segments, churn risk, lifetime value, and revenue."
+                )
             create_payload = {
                 "displayName": dataagent_name,
                 "description": "Customer360 conversational analytics agent",
-                "configuration": {
-                    "dataSources": [
-                        {
-                            "type": "Lakehouse",
-                            "workspaceId": workspace_id,
-                            "itemId": lakehouse_id,
-                        }
-                    ]
-                },
+                "configuration": create_config,
             }
             create_resp = None
             for _attempt in range(1, NAME_RETRY_MAX + 1):
@@ -949,10 +969,17 @@ def configure_dataagent(
                 str(ds.get("itemId", "")).lower() == lakehouse_id.lower()
                 for ds in data_sources
             )
+            # Check whether the API actually returned configuration data.
+            # The Fabric preview GET /dataAgents/{id} often omits the
+            # 'configuration' field entirely, making it impossible to tell
+            # whether the Lakehouse is already linked.
+            has_config_data = "configuration" in current
+
             print(
                 f"   Agent current state: '{raw_state or 'unknown'}', "
                 f"data sources: {len(data_sources)}, "
-                f"lakehouse already linked: {already_linked}"
+                f"lakehouse already linked: {already_linked}, "
+                f"config in response: {has_config_data}"
             )
             if already_linked and not is_draft:
                 print(
@@ -968,6 +995,44 @@ def configure_dataagent(
                 # Skip to publish-only attempt below
                 _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
                 return
+
+            # When the API didn't return configuration data we cannot determine
+            # linkage status.  Rather than blindly PATCHing (which moves a
+            # Published agent to Draft with no API way to re-publish), probe
+            # the query endpoint to check if the agent is already functional.
+            if not has_config_data and not is_draft:
+                print(
+                    "   API did not return 'configuration' — probing query "
+                    "endpoint to check if agent is already functional..."
+                )
+                try:
+                    probe_url = (
+                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+                        f"/dataAgents/{agent_id}/query"
+                    )
+                    probe_resp = requests.post(
+                        probe_url,
+                        headers=req_headers,
+                        json={"userMessage": "test connectivity"},
+                        timeout=30,
+                    )
+                    if probe_resp.status_code != 404:
+                        print(
+                            f"   ✓ Query endpoint responded HTTP {probe_resp.status_code} — "
+                            "agent is functional. Skipping PATCH to preserve "
+                            "published state."
+                        )
+                        return
+                    print(
+                        f"   Query endpoint returned 404 — agent may need "
+                        "configuration. Proceeding with PATCH."
+                    )
+                except Exception as probe_exc:
+                    print(
+                        f"   Query probe failed ({probe_exc}) — "
+                        "proceeding with PATCH as a precaution."
+                    )
+
             print(
                 f"   Lakehouse not yet linked (or agent mis-configured) — "
                 f"will PATCH configuration."
@@ -1230,7 +1295,45 @@ def publish_dataagent(
                     "   ╚══════════════════════════════════════════════════════════╝\n"
                 )
             else:
-                print(f"   ✓ Agent state verified: '{raw_state}' — agent is queryable.")
+                # State is 'unknown' or appears published.  Probe the query
+                # endpoint for a definitive check (the Fabric GET API often
+                # omits the state field entirely).
+                print(f"   Agent state from metadata: '{raw_state}'")
+                try:
+                    probe_url = (
+                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+                        f"/dataAgents/{agent_id}/query"
+                    )
+                    probe_resp = requests.post(
+                        probe_url,
+                        headers={"Authorization": f"Bearer {token}",
+                                 "Content-Type": "application/json"},
+                        json={"userMessage": "test"},
+                        timeout=30,
+                    )
+                    if probe_resp.status_code == 404:
+                        print(
+                            "\n"
+                            "   ╔══════════════════════════════════════════════════════════╗\n"
+                            "   ║  ⚠️  Agent query endpoint returned 404!                 ║\n"
+                            "   ╠══════════════════════════════════════════════════════════╣\n"
+                            "   ║  The agent metadata is accessible but the query         ║\n"
+                            "   ║  endpoint is not — the agent may need to be published.  ║\n"
+                            "   ║                                                          ║\n"
+                            "   ║  To fix:                                                 ║\n"
+                            "   ║  1. Open the Fabric portal:                              ║\n"
+                            f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}\n"
+                            f"   ║  2. Open the agent '{agent_name}'                       ║\n"
+                            "   ║  3. Click 'Publish' in the top ribbon                   ║\n"
+                            "   ╚══════════════════════════════════════════════════════════╝\n"
+                        )
+                    else:
+                        print(
+                            f"   ✓ Query endpoint responded HTTP {probe_resp.status_code} "
+                            "— agent is queryable."
+                        )
+                except Exception as probe_exc:
+                    print(f"   [WARN] Query probe failed (non-fatal): {probe_exc}")
         else:
             print(
                 f"   [WARN] Post-publish GET returned HTTP {check_resp.status_code} — "
@@ -2137,7 +2240,8 @@ def main(argv=None) -> None:
         step_label = "Step 5" if args.skip_data_upload else "Step 6"
         print(f"\n🤖 {step_label}: Fabric Data Agent")
         dataagent_id = get_or_create_dataagent(
-            workspace_id, args.dataagent_name, lakehouse_id, fabric_token
+            workspace_id, args.dataagent_name, lakehouse_id, fabric_token,
+            table_name=args.table_name,
         )
 
         # ── 5a / 6a. Configure Data Agent (link Lakehouse + table) ────────
