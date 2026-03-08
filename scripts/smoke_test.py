@@ -75,31 +75,39 @@ def check_chat_api(
     backend_url: str,
     message: str,
     timeout: int,
+    retries: int = 3,
+    retry_wait: int = 15,
 ) -> Tuple[bool, str]:
     url = f"{backend_url.rstrip('/')}/api/chat"
-    resp = requests.post(
-        url,
-        json={"message": message, "userId": "smoke-test"},
-        timeout=timeout,
-    )
-    if resp.status_code == 200:
-        data = resp.json()
-        answer = data.get("answer", "")
-        preview = answer[:120] + ("…" if len(answer) > 120 else "")
-        return True, f'Got answer ({len(answer)} chars): "{preview}"'
-    if resp.status_code == 503:
-        # Try to get the actual detail from the response body
-        try:
-            detail = resp.json().get("detail", "")
-            if isinstance(detail, dict):
-                detail = detail.get("message", str(detail))
-        except Exception:
-            detail = resp.text[:200]
-        return (
-            False,
-            f"503 – {detail or 'Backend not ready (Fabric agent may not be configured yet)'}",
+    last_detail = ""
+    for attempt in range(1, retries + 1):
+        resp = requests.post(
+            url,
+            json={"message": message, "userId": "smoke-test"},
+            timeout=timeout,
         )
-    return False, f"HTTP {resp.status_code} – {resp.text[:200]}"
+        if resp.status_code == 200:
+            data = resp.json()
+            answer = data.get("answer", "")
+            preview = answer[:120] + ("…" if len(answer) > 120 else "")
+            return True, f'Got answer ({len(answer)} chars): "{preview}"'
+        if resp.status_code == 503:
+            # Try to get the actual detail from the response body
+            try:
+                detail = resp.json().get("detail", "")
+                if isinstance(detail, dict):
+                    detail = detail.get("message", str(detail))
+            except Exception:
+                detail = resp.text[:200]
+            last_detail = f"503 – {detail or 'Backend not ready (Fabric agent may not be configured yet)'}"
+        else:
+            last_detail = f"HTTP {resp.status_code} – {resp.text[:200]}"
+        # Retry on 503 (agent warming up) — give the Fabric Data Agent time
+        # to become fully queryable after deployment/publish.
+        if attempt < retries and resp.status_code in (503, 502, 504):
+            print(f"    ↻ attempt {attempt}/{retries} failed ({resp.status_code}), retrying in {retry_wait}s…")
+            time.sleep(retry_wait)
+    return False, last_detail
 
 
 def check_cors_headers(backend_url: str, frontend_url: str, timeout: int) -> Tuple[bool, str]:

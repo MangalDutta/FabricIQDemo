@@ -1286,14 +1286,49 @@ def _get_lakehouse_sm_id(workspace_id: str, lakehouse_id: str, token: str) -> Op
     return None
 
 
-def _build_direct_lake_bim(model_name: str, table_name: str) -> Dict[str, Any]:
+def _get_sql_endpoint_info(
+    workspace_id: str, lakehouse_id: str, token: str
+) -> Optional[str]:
+    """
+    Reads the SQL Analytics endpoint connection string from the Lakehouse
+    properties.
+
+    Returns the server hostname (e.g.
+    ``xxx.datawarehouse.fabric.microsoft.com``) or *None* if unavailable.
+    """
+    if not lakehouse_id:
+        return None
+    try:
+        resp = requests.get(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/lakehouses/{lakehouse_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if not resp.ok:
+            return None
+        props = resp.json().get("properties") or {}
+        sql_props = props.get("sqlEndpointProperties") or {}
+        conn_str = sql_props.get("connectionString")
+        if conn_str and sql_props.get("provisioningStatus") == "Success":
+            return conn_str
+    except Exception:
+        pass
+    return None
+
+
+def _build_direct_lake_bim(
+    model_name: str,
+    table_name: str,
+    sql_endpoint_server: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Build a minimal BIM (JSON) for a Direct Lake semantic model that connects
     to a Fabric Lakehouse via entity-based Direct Lake partitions.
 
-    The model uses 'Lakehouse.Contents(null)' as the M expression source —
-    Fabric binds this automatically to the workspace's Lakehouse when the
-    semantic model item is created inside the same workspace.
+    When *sql_endpoint_server* is provided the M expression uses
+    ``Sql.Database(server, database)`` which Fabric recognises as a valid
+    Direct Lake data source.  Without it the function falls back to
+    ``Lakehouse.Contents(null)`` (may fail on some Fabric API versions).
 
     The Customer360 column schema is hardcoded because this accelerator
     always loads the same table; change if you adapt the project.
@@ -1356,10 +1391,19 @@ def _build_direct_lake_bim(model_name: str, table_name: str) -> Dict[str, Any]:
                     "name": "DatabaseQuery",
                     "kind": "m",
                     "expression": (
-                        "let\n"
-                        "    database = Lakehouse.Contents(null)\n"
-                        "in\n"
-                        "    database"
+                        (
+                            "let\n"
+                            f'    database = Sql.Database("{sql_endpoint_server}", "{model_name}")\n'
+                            "in\n"
+                            "    database"
+                        )
+                        if sql_endpoint_server
+                        else (
+                            "let\n"
+                            "    database = Lakehouse.Contents(null)\n"
+                            "in\n"
+                            "    database"
+                        )
                     ),
                 }
             ],
@@ -1399,6 +1443,7 @@ def create_direct_lake_semantic_model(
     model_name: str,
     table_name: str,
     token: str,
+    sql_endpoint_server: Optional[str] = None,
 ) -> Optional[str]:
     """
     Creates a Direct Lake SemanticModel Fabric item via the Fabric Items API.
@@ -1418,7 +1463,7 @@ def create_direct_lake_semantic_model(
     """
     print(f"   Creating Direct Lake semantic model via Fabric Items API: {model_name}")
 
-    bim = _build_direct_lake_bim(model_name, table_name)
+    bim = _build_direct_lake_bim(model_name, table_name, sql_endpoint_server=sql_endpoint_server)
     bim_b64 = base64.b64encode(json.dumps(bim, indent=2).encode()).decode()
 
     # definition.pbism is a required connection descriptor for Fabric
@@ -1675,7 +1720,13 @@ def get_default_semantic_model(
     # This is the PRIMARY creation path. It does not require the Power BI API
     # tenant setting and avoids the 404 returned by createDefaultSemanticModel
     # for service principals without that setting enabled.
-    sm_id = create_direct_lake_semantic_model(workspace_id, lakehouse_name, table_name, token)
+    sql_endpoint_server = _get_sql_endpoint_info(workspace_id, lakehouse_id, token)
+    if sql_endpoint_server:
+        print(f"   Using SQL endpoint for Direct Lake: {sql_endpoint_server}")
+    sm_id = create_direct_lake_semantic_model(
+        workspace_id, lakehouse_name, table_name, token,
+        sql_endpoint_server=sql_endpoint_server,
+    )
     if sm_id:
         return sm_id
 
