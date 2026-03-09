@@ -64,7 +64,7 @@ interface PbiEmbedState {
   fallbackUrl: string;
 }
 
-type ChatMode = 'simple' | 'detailed' | 'compare';
+type ChatMode = 'detailed' | 'compare';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 const CHAT_TIMEOUT_MS = 120_000; // 2 minutes — matches backend Fabric query timeout
@@ -77,9 +77,9 @@ const App: React.FC = () => {
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
 
-  // Chat mode: simple (REST API), detailed (Assistants API with run details),
+  // Chat mode: detailed (Assistants API with run details),
   // or compare (draft vs production side-by-side).
-  const [chatMode, setChatMode] = useState<ChatMode>('simple');
+  const [chatMode, setChatMode] = useState<ChatMode>('detailed');
 
   // Thread name for Assistants API persistent conversations
   const [threadName, setThreadName] = useState('');
@@ -467,13 +467,12 @@ const App: React.FC = () => {
 
           {/* ── Mode toggle ── */}
           <div className="mode-toggle">
-            {(['simple', 'detailed', 'compare'] as ChatMode[]).map(mode => (
+            {(['detailed', 'compare'] as ChatMode[]).map(mode => (
               <button
                 key={mode}
                 className={`mode-btn${chatMode === mode ? ' mode-btn--active' : ''}`}
                 onClick={() => setChatMode(mode)}
               >
-                {mode === 'simple' && '💬 Simple'}
                 {mode === 'detailed' && '🔍 Detailed'}
                 {mode === 'compare' && '⚖️ Compare'}
               </button>
@@ -522,69 +521,7 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {agentNotReady && (
-          <div className="status-banner status-banner-warning">
-            <div className="status-banner-content">
-              <span className="status-banner-icon">⚠️</span>
-              <div className="status-banner-text">
-                <strong>AI Agent Not Ready</strong>
-                <p>{agentStatus!.message}</p>
 
-                {/* Auto-publish button — tries to publish the agent via API */}
-                <div style={{ marginTop: '8px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button
-                    className="retry-btn"
-                    onClick={tryPublishAgent}
-                    disabled={publishState.loading}
-                    title="Attempt to publish the Fabric Data Agent using the backend Managed Identity"
-                  >
-                    {publishState.loading ? '⏳ Publishing…' : '🚀 Try Auto-Publish Agent'}
-                  </button>
-                </div>
-
-                {/* Result of last publish attempt */}
-                {publishState.result && (
-                  <p style={{ marginTop: '6px', fontSize: '0.85em' }}>
-                    <TextWithLinks text={publishState.result} />
-                    {publishState.portalUrl && (
-                      <>
-                        {' '}—{' '}
-                        <a
-                          href={publishState.portalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-link"
-                        >
-                          Open in Fabric portal →
-                        </a>
-                      </>
-                    )}
-                  </p>
-                )}
-
-                {agentStatus!.troubleshooting.length > 0 && (
-                  <details className="status-banner-details" style={{ marginTop: '8px' }}>
-                    <summary>Manual setup instructions</summary>
-                    <ol>
-                      {agentStatus!.troubleshooting.map((step, i) => (
-                        <li key={i}>
-                          <TextWithLinks text={step} />
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
-                )}
-              </div>
-              <button
-                className="status-banner-refresh"
-                onClick={checkAgentStatus}
-                title="Recheck status"
-              >
-                🔄
-              </button>
-            </div>
-          </div>
-        )}
 
         <div className="messages-container">
           {messages.length === 0 && (
@@ -598,7 +535,7 @@ const App: React.FC = () => {
                     className={`sample-question-btn${agentNotReady ? ' sample-question-btn--disabled' : ''}`}
                     onClick={() => !agentNotReady && setInput(q)}
                     disabled={!!agentNotReady}
-                    title={agentNotReady ? 'AI Agent is not ready — see banner above' : ''}
+                    title={agentNotReady ? 'AI Agent is not ready' : ''}
                   >
                     {q}
                   </button>
