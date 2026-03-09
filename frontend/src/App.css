@@ -350,3 +350,141 @@ body {
   color: #666;
   line-height: 1.5;
 }
+
+/* ── Mode toggle ───────────────────────────────────────────────────────── */
+
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-top: 0.75rem;
+}
+
+.mode-btn {
+  padding: 0.35rem 0.75rem;
+  background: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
+}
+
+.mode-btn--active {
+  background: rgba(255, 255, 255, 0.35);
+  color: white;
+  border-color: rgba(255, 255, 255, 0.6);
+  font-weight: 600;
+}
+
+/* ── Thread name input ─────────────────────────────────────────────────── */
+
+.thread-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.thread-input {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  font-size: 0.8rem;
+  outline: none;
+}
+
+.thread-input::placeholder {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ── Compare config ────────────────────────────────────────────────────── */
+
+.compare-config {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 0.5rem;
+}
+
+.compare-config-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.compare-config-row label {
+  min-width: 140px;
+  text-align: right;
+}
+
+/* ── Run details panel (detailed mode) ─────────────────────────────────── */
+
+.run-details-panel {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #e8eaf6;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  color: #333;
+}
+
+.run-details-panel summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: #3949ab;
+  padding: 2px 0;
+}
+
+.run-detail-section {
+  margin-top: 0.5rem;
+}
+
+.run-detail-section strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.sql-block {
+  background: #263238;
+  color: #cfd8dc;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.78rem;
+  margin: 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.data-preview-block {
+  background: #f5f5f5;
+  color: #333;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  font-size: 0.76rem;
+  margin: 4px 0;
+  white-space: pre;
+  line-height: 1.4;
+}
+
+.message-timestamp {
+  font-size: 0.75rem;
+  color: #999;
+  margin-top: 4px;
+}

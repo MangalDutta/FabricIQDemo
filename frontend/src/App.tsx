@@ -29,6 +29,24 @@ interface Message {
   timestamp?: string;
   isError?: boolean;
   failedMessage?: string;
+  /** Detailed run info when using the Assistants API */
+  runDetails?: RunDetails | null;
+}
+
+interface RunDetails {
+  run_status: string;
+  sql_queries?: string[];
+  sql_data_previews?: (string[] | null)[];
+  data_retrieval_query?: string;
+  answer?: string;
+}
+
+interface CompareResult {
+  question: string;
+  draft: { answer: string; run_status: string; sql_queries: string[]; error: string | null };
+  production: { answer: string; run_status: string; sql_queries: string[]; error: string | null };
+  match: boolean;
+  timestamp: number;
 }
 
 interface AgentStatus {
@@ -46,6 +64,8 @@ interface PbiEmbedState {
   fallbackUrl: string;
 }
 
+type ChatMode = 'simple' | 'detailed' | 'compare';
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 const CHAT_TIMEOUT_MS = 120_000; // 2 minutes — matches backend Fabric query timeout
 
@@ -56,6 +76,18 @@ const App: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+
+  // Chat mode: simple (REST API), detailed (Assistants API with run details),
+  // or compare (draft vs production side-by-side).
+  const [chatMode, setChatMode] = useState<ChatMode>('simple');
+
+  // Thread name for Assistants API persistent conversations
+  const [threadName, setThreadName] = useState('');
+
+  // Compare mode state
+  const [draftAgentId, setDraftAgentId] = useState('');
+  const [prodAgentId, setProdAgentId] = useState('');
+  const [compareResult, setCompareResult] = useState<CompareResult | null>(null);
 
   // Power BI embed state — driven by a backend-generated embed token so users
   // don't need to be signed into Power BI in their browser.
@@ -216,12 +248,18 @@ const App: React.FC = () => {
     }
     setMessages([]);
     setInput('');
+    setCompareResult(null);
   };
 
   // ── Chat ────────────────────────────────────────────────────────────────────
   const sendMessage = async (overrideMessage?: string) => {
     const messageText = overrideMessage || input;
     if (!messageText.trim()) return;
+
+    // In compare mode, delegate to the compare handler
+    if (chatMode === 'compare') {
+      return sendCompare(messageText);
+    }
 
     const userMessage: Message = {
       role: 'user',
@@ -238,17 +276,47 @@ const App: React.FC = () => {
     const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
 
     try {
-      const response = await axios.post(
-        `${BACKEND_URL}/api/chat`,
-        { message: messageText, userId: 'web-user' },
-        { signal: controller.signal },
-      );
+      let assistantMessage: Message;
 
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: response.data.answer || 'No response received.',
-        timestamp: response.data.timestamp,
-      };
+      if (chatMode === 'detailed') {
+        // Use the Assistants API for richer response (run details, SQL, etc.)
+        const response = await axios.post(
+          `${BACKEND_URL}/api/agent/run-details`,
+          {
+            question: messageText,
+            thread_name: threadName || null,
+          },
+          { signal: controller.signal },
+        );
+
+        const details: RunDetails = {
+          run_status: response.data.run_status,
+          sql_queries: response.data.sql_queries || [],
+          sql_data_previews: response.data.sql_data_previews || [],
+          data_retrieval_query: response.data.data_retrieval_query || '',
+          answer: response.data.answer || '',
+        };
+
+        assistantMessage = {
+          role: 'assistant',
+          content: response.data.answer || 'No response received.',
+          timestamp: new Date(response.data.timestamp * 1000).toISOString(),
+          runDetails: details,
+        };
+      } else {
+        // Simple mode — existing REST API
+        const response = await axios.post(
+          `${BACKEND_URL}/api/chat`,
+          { message: messageText, userId: 'web-user' },
+          { signal: controller.signal },
+        );
+        assistantMessage = {
+          role: 'assistant',
+          content: response.data.answer || 'No response received.',
+          timestamp: response.data.timestamp,
+        };
+      }
+
       setMessages(prev => [...prev, assistantMessage]);
 
       // If we got a successful response the agent is working — refresh banner.
@@ -269,10 +337,6 @@ const App: React.FC = () => {
               ? 'To fix this:\n' + steps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n')
               : detail.message || 'Please check the backend /api/debug endpoint for details.');
 
-          // Directly mark agent as not-ready so the warning banner appears immediately.
-          // We do NOT re-call checkAgentStatus() here because the /api/status endpoint
-          // may still return "ready" (it uses a lightweight probe that can lag behind
-          // the actual query endpoint state on a freshly deployed agent).
           setAgentStatus(prev => ({
             ready: false,
             message:
@@ -305,6 +369,73 @@ const App: React.FC = () => {
     }
   };
 
+  // ── Compare: draft vs production ────────────────────────────────────────────
+  const sendCompare = async (messageText: string) => {
+    if (!draftAgentId.trim() || !prodAgentId.trim()) {
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: '⚠️ Please enter both Draft and Production Agent IDs before comparing.',
+          timestamp: new Date().toISOString(),
+          isError: true,
+        },
+      ]);
+      return;
+    }
+
+    const userMessage: Message = {
+      role: 'user',
+      content: `[Compare] ${messageText}`,
+      timestamp: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setLoading(true);
+
+    try {
+      const response = await axios.post(
+        `${BACKEND_URL}/api/agent/compare`,
+        {
+          question: messageText,
+          draft_agent_id: draftAgentId,
+          production_agent_id: prodAgentId,
+        },
+        { timeout: CHAT_TIMEOUT_MS },
+      );
+      setCompareResult(response.data);
+
+      const matchIcon = response.data.match ? '✅' : '❌';
+      const summary =
+        `${matchIcon} Responses ${response.data.match ? 'MATCH' : 'DIFFER'}\n\n` +
+        `**Draft answer:**\n${response.data.draft?.answer || response.data.draft?.error || '(no response)'}\n\n` +
+        `**Production answer:**\n${response.data.production?.answer || response.data.production?.error || '(no response)'}`;
+
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: summary,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    } catch (error: any) {
+      const detail = error.response?.data?.detail;
+      setMessages(prev => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Error comparing agents: ${typeof detail === 'string' ? detail : error.message}`,
+          timestamp: new Date().toISOString(),
+          isError: true,
+          failedMessage: messageText,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const retryMessage = (message: string) => sendMessage(message);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -333,6 +464,62 @@ const App: React.FC = () => {
               </button>
             )}
           </div>
+
+          {/* ── Mode toggle ── */}
+          <div className="mode-toggle">
+            {(['simple', 'detailed', 'compare'] as ChatMode[]).map(mode => (
+              <button
+                key={mode}
+                className={`mode-btn${chatMode === mode ? ' mode-btn--active' : ''}`}
+                onClick={() => setChatMode(mode)}
+              >
+                {mode === 'simple' && '💬 Simple'}
+                {mode === 'detailed' && '🔍 Detailed'}
+                {mode === 'compare' && '⚖️ Compare'}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Detailed mode: thread name ── */}
+          {chatMode === 'detailed' && (
+            <div className="thread-input-row">
+              <label htmlFor="thread-name">🧵 Thread:</label>
+              <input
+                id="thread-name"
+                type="text"
+                value={threadName}
+                onChange={e => setThreadName(e.target.value)}
+                placeholder="(optional) persistent thread name"
+                className="thread-input"
+              />
+            </div>
+          )}
+
+          {/* ── Compare mode: agent IDs ── */}
+          {chatMode === 'compare' && (
+            <div className="compare-config">
+              <div className="compare-config-row">
+                <label>Draft Agent ID:</label>
+                <input
+                  type="text"
+                  value={draftAgentId}
+                  onChange={e => setDraftAgentId(e.target.value)}
+                  placeholder="Fabric Data Agent GUID (draft)"
+                  className="thread-input"
+                />
+              </div>
+              <div className="compare-config-row">
+                <label>Production Agent ID:</label>
+                <input
+                  type="text"
+                  value={prodAgentId}
+                  onChange={e => setProdAgentId(e.target.value)}
+                  placeholder="Fabric Data Agent GUID (production)"
+                  className="thread-input"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {agentNotReady && (
@@ -444,6 +631,51 @@ const App: React.FC = () => {
                       ))
                     : msg.content}
                 </div>
+
+                {/* Run details panel (detailed mode) */}
+                {msg.runDetails && (
+                  <details className="run-details-panel">
+                    <summary>
+                      🔍 Run Details — Status: {msg.runDetails.run_status}
+                      {msg.runDetails.sql_queries && msg.runDetails.sql_queries.length > 0
+                        ? ` · ${msg.runDetails.sql_queries.length} SQL quer${msg.runDetails.sql_queries.length === 1 ? 'y' : 'ies'}`
+                        : ''}
+                    </summary>
+
+                    {msg.runDetails.data_retrieval_query && (
+                      <div className="run-detail-section">
+                        <strong>🎯 Data Retrieval Query:</strong>
+                        <pre className="sql-block">{msg.runDetails.data_retrieval_query}</pre>
+                      </div>
+                    )}
+
+                    {msg.runDetails.sql_queries && msg.runDetails.sql_queries.length > 0 && (
+                      <div className="run-detail-section">
+                        <strong>🗃️ All SQL Queries:</strong>
+                        {msg.runDetails.sql_queries.map((q, qi) => (
+                          <pre key={qi} className="sql-block">{q}</pre>
+                        ))}
+                      </div>
+                    )}
+
+                    {msg.runDetails.sql_data_previews &&
+                      msg.runDetails.sql_data_previews.some(p => p && p.length > 0) && (
+                        <div className="run-detail-section">
+                          <strong>📊 Data Preview:</strong>
+                          {msg.runDetails.sql_data_previews.map(
+                            (preview, pi) =>
+                              preview &&
+                              preview.length > 0 && (
+                                <pre key={pi} className="data-preview-block">
+                                  {preview.join('\n')}
+                                </pre>
+                              ),
+                          )}
+                        </div>
+                      )}
+                  </details>
+                )}
+
                 {msg.isError && msg.failedMessage && (
                   <button
                     className="retry-btn"
@@ -487,6 +719,10 @@ const App: React.FC = () => {
             placeholder={
               agentNotReady
                 ? 'AI Agent is not ready — see banner above for details'
+                : chatMode === 'compare'
+                ? 'Enter a question to send to both draft and production agents…'
+                : chatMode === 'detailed'
+                ? 'Ask with detailed run info (SQL queries, data previews)…'
                 : 'Ask about customers, churn risk, revenue trends...'
             }
             disabled={loading}

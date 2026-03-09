@@ -693,3 +693,329 @@ class TestAgentNotReadyError:
                 assert data["detail"]["error"] == "agent_not_ready"
                 assert isinstance(data["detail"]["troubleshooting"], list)
                 assert len(data["detail"]["troubleshooting"]) > 0
+
+
+# ─── FabricAgentClient unit tests ─────────────────────────────────────────────
+
+class TestFabricAgentClientInit:
+    """Tests for FabricAgentClient initialisation and validation."""
+
+    def test_raises_without_workspace_id(self):
+        """Must raise ValueError when workspace_id is missing."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "", "FABRIC_DATAAGENT_ID": "agent-id"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                from fabric_agent_client import FabricAgentClient
+                importlib.reload(sys.modules["fabric_agent_client"])
+                from fabric_agent_client import FabricAgentClient
+                with pytest.raises(ValueError, match="workspace_id"):
+                    FabricAgentClient()
+
+    def test_raises_without_agent_id(self):
+        """Must raise ValueError when agent_id is missing."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws-id", "FABRIC_DATAAGENT_ID": ""}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+                with pytest.raises(ValueError, match="agent_id"):
+                    fac.FabricAgentClient()
+
+    def test_explicit_params_override_env(self):
+        """Explicit constructor parameters must override environment variables."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "env-ws", "FABRIC_DATAAGENT_ID": "env-ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+                client = fac.FabricAgentClient(
+                    workspace_id="override-ws",
+                    agent_id="override-ag",
+                    agent_name="TestAgent",
+                )
+                assert client.workspace_id == "override-ws"
+                assert client.agent_id == "override-ag"
+                assert client.agent_name == "TestAgent"
+
+    def test_data_agent_url_is_built_correctly(self):
+        """The OpenAI-compatible URL must be built from workspace and agent IDs."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws-123", "FABRIC_DATAAGENT_ID": "ag-456"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+                client = fac.FabricAgentClient()
+                assert "ws-123" in client._data_agent_url
+                assert "ag-456" in client._data_agent_url
+                assert client._data_agent_url.endswith("/aiassistant/openai")
+
+
+class TestFabricAgentClientHelpers:
+    """Tests for SQL extraction and data parsing helpers."""
+
+    def test_sql_from_function_args_extracts_sql(self):
+        """Should extract SQL from tool call function arguments."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                tc = MagicMock()
+                tc.function.arguments = '{"sql": "SELECT * FROM customers WHERE id > 10"}'
+                result = fac.FabricAgentClient._sql_from_function_args(tc)
+                assert len(result) == 1
+                assert "SELECT" in result[0]
+
+    def test_sql_from_function_args_empty_on_no_sql(self):
+        """Should return empty list when no SQL keys are present."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                tc = MagicMock()
+                tc.function.arguments = '{"key": "value"}'
+                result = fac.FabricAgentClient._sql_from_function_args(tc)
+                assert result == []
+
+    def test_data_from_output_formats_table(self):
+        """Should format JSON list of dicts into markdown table lines."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                tc = MagicMock()
+                tc.output = '[{"name": "Alice", "age": "30"}, {"name": "Bob", "age": "25"}]'
+                result = fac.FabricAgentClient._data_from_output(tc)
+                assert len(result) == 4  # header + separator + 2 data rows
+                assert "name" in result[0]
+                assert "Alice" in result[2]
+
+    def test_extract_data_from_text_markdown_table(self):
+        """Should extract a markdown table from text content."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                text = "Here are the results:\n| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |"
+                result = fac.FabricAgentClient._extract_data_from_text(text)
+                assert len(result) == 1  # raw markdown table as single item
+                assert "Alice" in result[0]
+
+    def test_extract_data_from_text_numbered_list(self):
+        """Should extract numbered list items when no table is present."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                text = "Results:\n1. Alice is 30\n2. Bob is 25\n"
+                result = fac.FabricAgentClient._extract_data_from_text(text)
+                assert len(result) == 2
+                assert "Alice" in result[0]
+
+    def test_sql_from_output_extracts_from_json(self):
+        """Should extract SQL from JSON output."""
+        with patch.dict(os.environ, {"FABRIC_WORKSPACE_ID": "ws", "FABRIC_DATAAGENT_ID": "ag"}):
+            with patch("fabric_agent_client.DefaultAzureCredential"):
+                import fabric_agent_client as fac
+                importlib.reload(fac)
+
+                tc = MagicMock()
+                tc.output = '{"generated_code": "SELECT COUNT(*) FROM orders WHERE amount > 100"}'
+                result = fac.FabricAgentClient._sql_from_output(tc)
+                assert len(result) >= 1
+                assert "SELECT" in result[0]
+
+
+# ─── Agent API endpoint tests ────────────────────────────────────────────────
+
+def _make_mock_agent_client():
+    """Returns a MagicMock that looks like a FabricAgentClient."""
+    mock = MagicMock()
+    mock.ask.return_value = "Mock agent answer via Assistants API"
+    mock.get_run_details.return_value = {
+        "question": "test",
+        "answer": "Detailed mock answer",
+        "run_status": "completed",
+        "run_steps": {"data": []},
+        "messages": {"data": []},
+        "timestamp": 1700000000.0,
+        "thread": {"id": "thread-123", "name": "test-thread"},
+        "sql_queries": ["SELECT * FROM customers"],
+        "sql_data_previews": [["| name | age |", "|---|---|", "| Alice | 30 |"]],
+        "data_retrieval_query": "SELECT * FROM customers",
+    }
+    mock.get_raw_run_response.return_value = {
+        "question": "test",
+        "run": {},
+        "steps": {},
+        "messages": {},
+        "timestamp": 1700000000.0,
+        "success": True,
+        "thread": {"id": "thread-123", "name": "test-thread"},
+    }
+    mock.compare_draft_vs_production.return_value = {
+        "question": "test",
+        "draft": {"answer": "draft answer", "run_status": "completed", "sql_queries": [], "error": None},
+        "production": {"answer": "prod answer", "run_status": "completed", "sql_queries": [], "error": None},
+        "match": False,
+        "timestamp": 1700000000.0,
+    }
+    return mock
+
+
+@pytest.fixture()
+def test_client_with_agent():
+    """TestClient where both FabricClient and FabricAgentClient are mocked."""
+    mock_fc = _make_mock_fabric_client("simple answer")
+    mock_ac = _make_mock_agent_client()
+
+    with patch.dict(
+        os.environ,
+        {
+            "FABRIC_WORKSPACE_ID": "ws-fake-guid-0000",
+            "FABRIC_DATAAGENT_ID": "agent-fake-guid-0000",
+        },
+    ):
+        with patch("fabric_client.FabricClient", return_value=mock_fc):
+            with patch("fabric_agent_client.FabricAgentClient", return_value=mock_ac):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                app_module.agent_client = mock_ac
+                yield TestClient(app_module.app)
+
+
+@pytest.fixture()
+def test_client_no_agent():
+    """TestClient where FabricAgentClient is None (not configured)."""
+    mock_fc = _make_mock_fabric_client("simple answer")
+
+    with patch.dict(
+        os.environ,
+        {
+            "FABRIC_WORKSPACE_ID": "ws-fake-guid-0000",
+            "FABRIC_DATAAGENT_ID": "agent-fake-guid-0000",
+        },
+    ):
+        with patch("fabric_client.FabricClient", return_value=mock_fc):
+            with patch("fabric_agent_client.FabricAgentClient", side_effect=Exception("no config")):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                app_module.agent_client = None
+                yield TestClient(app_module.app)
+
+
+class TestAgentAskEndpoint:
+    """Tests for POST /api/agent/ask."""
+
+    def test_ask_returns_200(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/ask", json={"question": "test"})
+        assert resp.status_code == 200
+
+    def test_ask_returns_answer(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/ask", json={"question": "test"})
+        data = resp.json()
+        assert "answer" in data
+        assert data["answer"] == "Mock agent answer via Assistants API"
+
+    def test_ask_requires_question(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/ask", json={})
+        assert resp.status_code == 400
+
+    def test_ask_empty_question_returns_400(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/ask", json={"question": "  "})
+        assert resp.status_code == 400
+
+    def test_ask_503_when_agent_not_configured(self, test_client_no_agent):
+        resp = test_client_no_agent.post("/api/agent/ask", json={"question": "test"})
+        assert resp.status_code == 503
+
+    def test_ask_passes_thread_name(self, test_client_with_agent):
+        resp = test_client_with_agent.post(
+            "/api/agent/ask",
+            json={"question": "test", "thread_name": "my-thread"},
+        )
+        assert resp.status_code == 200
+
+
+class TestAgentRunDetailsEndpoint:
+    """Tests for POST /api/agent/run-details."""
+
+    def test_run_details_returns_200(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/run-details", json={"question": "test"})
+        assert resp.status_code == 200
+
+    def test_run_details_has_sql_queries(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/run-details", json={"question": "test"})
+        data = resp.json()
+        assert "sql_queries" in data
+        assert len(data["sql_queries"]) > 0
+
+    def test_run_details_has_run_status(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/run-details", json={"question": "test"})
+        data = resp.json()
+        assert data["run_status"] == "completed"
+
+    def test_run_details_requires_question(self, test_client_with_agent):
+        resp = test_client_with_agent.post("/api/agent/run-details", json={})
+        assert resp.status_code == 400
+
+    def test_run_details_503_when_agent_not_configured(self, test_client_no_agent):
+        resp = test_client_no_agent.post("/api/agent/run-details", json={"question": "test"})
+        assert resp.status_code == 503
+
+
+class TestAgentCompareEndpoint:
+    """Tests for POST /api/agent/compare (draft vs production)."""
+
+    def test_compare_returns_200(self, test_client_with_agent):
+        resp = test_client_with_agent.post(
+            "/api/agent/compare",
+            json={
+                "question": "test",
+                "draft_agent_id": "draft-id",
+                "production_agent_id": "prod-id",
+            },
+        )
+        assert resp.status_code == 200
+
+    def test_compare_response_shape(self, test_client_with_agent):
+        resp = test_client_with_agent.post(
+            "/api/agent/compare",
+            json={
+                "question": "test",
+                "draft_agent_id": "draft-id",
+                "production_agent_id": "prod-id",
+            },
+        )
+        data = resp.json()
+        assert "draft" in data
+        assert "production" in data
+        assert "match" in data
+        assert isinstance(data["match"], bool)
+
+    def test_compare_requires_both_agent_ids(self, test_client_with_agent):
+        resp = test_client_with_agent.post(
+            "/api/agent/compare",
+            json={"question": "test", "draft_agent_id": "draft-id"},
+        )
+        assert resp.status_code == 400
+
+    def test_compare_requires_question(self, test_client_with_agent):
+        resp = test_client_with_agent.post(
+            "/api/agent/compare",
+            json={"draft_agent_id": "draft-id", "production_agent_id": "prod-id"},
+        )
+        assert resp.status_code == 400
+
+    def test_compare_503_when_agent_not_configured(self, test_client_no_agent):
+        resp = test_client_no_agent.post(
+            "/api/agent/compare",
+            json={
+                "question": "test",
+                "draft_agent_id": "draft-id",
+                "production_agent_id": "prod-id",
+            },
+        )
+        assert resp.status_code == 503
