@@ -66,16 +66,6 @@ module acr 'modules/acr.bicep' = {
   }
 }
 
-module keyVault 'modules/keyvault.bicep' = {
-  name: 'keyvault-deployment'
-  params: {
-    baseName: baseName
-    env: env
-    location: location
-    privateEndpointSubnetId: networking.?outputs.privateEndpointSubnetId ?? ''
-  }
-}
-
 module appServices 'modules/appservice.bicep' = {
   name: 'appservices-deployment'
   params: {
@@ -84,7 +74,6 @@ module appServices 'modules/appservice.bicep' = {
     location: location
     logAnalyticsId: monitoring.outputs.logAnalyticsId
     acrName: acr.outputs.acrName
-    keyVaultName: keyVault.outputs.keyVaultName
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
   }
 }
@@ -101,7 +90,6 @@ module fabricCapacity 'modules/fabric_capacity.bicep' = if (!empty(fabricSku)) {
 }
 
 output acrName string = acr.outputs.acrName
-output keyVaultName string = keyVault.outputs.keyVaultName
 output backendAppName string = appServices.outputs.backendAppName
 output frontendAppName string = appServices.outputs.frontendAppName
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsId
