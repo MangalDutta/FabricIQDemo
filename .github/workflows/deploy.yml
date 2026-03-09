@@ -7,43 +7,53 @@ on:
       azure_subscription_id:
         description: 'Azure Subscription ID'
         required: true
+        type: string
       azure_tenant_id:
         description: 'Azure Tenant ID'
         required: true
+        type: string
       azure_client_id:
         description: 'OIDC Entra App Client ID'
         required: true
+        type: string
 
       # --- Azure infra ---
       resource_group:
         description: 'Target resource group (created if absent)'
         required: true
+        type: string
       location:
         description: 'Azure region (e.g. centralindia, eastus)'
         required: true
+        type: string
         default: 'centralindia'
 
       # --- Fabric workspace ---
       workspace_name:
         description: 'Fabric workspace display name'
         required: true
+        type: string
       fabric_sku:
-        description: 'NEW Fabric capacity SKU (F2, F4, F8, F16, F32, F64, F128, F256, F512, F1024, F2048, Trial). Leave blank to use an existing capacity via fabric_capacity_id.'
+        description: 'Fabric capacity SKU (F2..F2048 or Trial). Leave blank to use existing capacity.'
         required: false
+        type: string
         default: ''
       fabric_capacity_id:
         description: 'Existing Fabric capacityId GUID (Fabric Admin -> Capacity settings). Ignored when fabric_sku is set.'
         required: false
+        type: string
         default: ''
       skip_data_upload:
-        description: 'Skip CSV upload/table load (set true if table already loaded)'
+        description: 'Skip CSV upload/table load (true if tables already loaded)'
         required: false
-        default: 'false'
+        type: boolean
+        default: false
 
       # --- Power BI ---
       powerbi_report_url:
-        description: 'Power BI embedded report URL. Leave blank on first deploy - workflow will create the report. On re-deploy, paste the URL here.'
+        description: 'Power BI embedded report URL (leave blank on first deploy)'
         required: false
+        type: string
         default: ''
 
 # Hardcoded defaults (not exposed as inputs to stay within the 10-input limit):

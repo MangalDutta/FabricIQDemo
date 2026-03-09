@@ -183,6 +183,8 @@ Microsoft Fabric API:
 
 ### Step 1 — Run the GitHub Actions Workflow
 
+> **If you don't see the workflow in the Actions tab:** Go to your repo → **Actions** tab → click **"I understand my workflows, go ahead and enable them"** to enable GitHub Actions. The **Quick Deploy Customer360** workflow will then appear in the left sidebar.
+
 Go to your repo → **Actions** → **Quick Deploy Customer360** → **Run workflow**
 
 Fill in the inputs:
