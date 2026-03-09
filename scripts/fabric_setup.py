@@ -1011,10 +1011,13 @@ def get_or_create_dataagent(
             print(
                 f"✓ Data Agent created via Items API: {dataagent_name} (ID: {agent_id})"
             )
-            print(
-                "   ℹ️  NOTE: Link this agent to the Lakehouse manually in the Fabric "
-                "portal if the API did not auto-configure the data source."
-            )
+            # Items API does not accept 'configuration' in the create payload,
+            # so the agent has no data source yet.  The caller's
+            # configure_dataagent step will link the Lakehouse table.
+            # Wait for Fabric to finish provisioning before any publish attempt.
+            print("   Waiting 20s for Fabric to finish provisioning the agent...")
+            time.sleep(20)
+            ensure_agent_published(workspace_id, agent_id, dataagent_name, token)
             return agent_id
 
     raise RuntimeError(
@@ -1109,18 +1112,24 @@ def configure_dataagent(
                 _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
                 return
 
-            # In Fabric preview, GET /dataAgents/{id} NEVER returns the
-            # 'configuration' field — so has_config_data is always False for
-            # existing agents.  Skip PATCH entirely: the agent is already
-            # configured by the user, and PATCH would revert it to Draft.
-            # ensure_agent_published (called in publish_dataagent) will do
-            # the single authoritative queryability check.
+            # In Fabric preview, GET /dataAgents/{id} often omits the
+            # 'configuration' field — so has_config_data is frequently False.
+            # We must distinguish between:
+            #   (a) Agent already properly configured → skip PATCH
+            #   (b) Newly created agent with no data source → must PATCH
+            # Use the /query endpoint as the authoritative check: if the
+            # agent is queryable it is already linked and published.
             if not has_config_data:
+                if _is_agent_queryable(workspace_id, agent_id, token):
+                    print(
+                        "   API did not return 'configuration' but agent IS queryable — "
+                        "skipping PATCH to avoid Draft-state regression."
+                    )
+                    return
                 print(
-                    "   API did not return 'configuration' (normal for Fabric preview) — "
-                    "skipping PATCH. Publish step will verify queryability."
+                    "   API did not return 'configuration' and agent is NOT queryable — "
+                    "proceeding with PATCH to link Lakehouse table."
                 )
-                return
         else:
             print(
                 f"   [WARN] GET agent returned HTTP {get_resp.status_code} — "
@@ -1358,6 +1367,96 @@ def publish_dataagent(
     """
     print(f"   Verifying Data Agent '{agent_name}' is published and queryable...")
     ensure_agent_published(workspace_id, agent_id, agent_name, token)
+
+
+def validate_dataagent(
+    workspace_id: str,
+    agent_id: str,
+    agent_name: str,
+    lakehouse_id: str,
+    token: str,
+) -> bool:
+    """
+    Post-setup validation for the Data Agent.
+
+    Checks:
+      1. Agent metadata is accessible (GET returns 2xx)
+      2. Agent is linked to the correct Lakehouse (if config is available)
+      3. Agent is queryable (query endpoint is reachable)
+
+    Returns True if all checks pass, False otherwise.
+    Prints detailed status for each check.
+    """
+    print(f"\n   🔍 Validating Data Agent '{agent_name}' (ID: {agent_id})...")
+    all_ok = True
+
+    # ── Check 1: Agent exists ────────────────────────────────────────────────
+    agent_exists = _validate_agent(workspace_id, agent_id, token)
+    if agent_exists:
+        print("   ✅ Check 1/3: Agent metadata is accessible (GET returned 2xx)")
+    else:
+        print("   ❌ Check 1/3: Agent metadata NOT accessible (GET returned non-2xx)")
+        all_ok = False
+
+    # ── Check 2: Lakehouse linkage ───────────────────────────────────────────
+    try:
+        agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
+        resp = requests.get(
+            agent_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+        if resp.ok:
+            current = resp.json()
+            config = current.get("configuration") or {}
+            data_sources = config.get("dataSources") or []
+            if "configuration" not in current:
+                print(
+                    "   ⚠️  Check 2/3: Lakehouse linkage — API did not return "
+                    "'configuration' field (normal for Fabric preview, cannot verify)"
+                )
+            elif any(
+                str(ds.get("itemId", "")).lower() == lakehouse_id.lower()
+                for ds in data_sources
+            ):
+                print("   ✅ Check 2/3: Agent is linked to the correct Lakehouse")
+            else:
+                print(
+                    f"   ❌ Check 2/3: Agent is NOT linked to Lakehouse '{lakehouse_id}'. "
+                    f"Found data sources: {[ds.get('itemId') for ds in data_sources]}"
+                )
+                all_ok = False
+        else:
+            print(f"   ⚠️  Check 2/3: Could not fetch agent details (HTTP {resp.status_code})")
+    except Exception as exc:
+        print(f"   ⚠️  Check 2/3: Lakehouse linkage check failed: {exc}")
+
+    # ── Check 3: Agent is queryable ──────────────────────────────────────────
+    queryable = _is_agent_queryable(workspace_id, agent_id, token)
+    if queryable:
+        print("   ✅ Check 3/3: Agent is queryable (query endpoint reachable)")
+    else:
+        print(
+            "   ⚠️  Check 3/3: Agent is NOT yet queryable (query endpoint → 404). "
+            "Manual publish may be required."
+        )
+        # Not a hard failure — user may need to publish manually
+        # but we still flag it
+
+    if all_ok and queryable:
+        print(f"   ✅ All validation checks passed for Data Agent '{agent_name}'")
+    elif all_ok:
+        print(
+            f"   ⚠️  Data Agent '{agent_name}' exists and is configured, but is not yet queryable.\n"
+            f"      Manual publish may be required in the Fabric portal."
+        )
+    else:
+        print(
+            f"   ❌ Some validation checks failed for Data Agent '{agent_name}'.\n"
+            f"      Check the messages above and resolve in the Fabric portal."
+        )
+
+    return all_ok
 
 
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
@@ -2278,6 +2377,14 @@ def main(argv=None) -> None:
         # ── 5b / 6b. Publish Data Agent ───────────────────────────────────
         print(f"\n📢 {step_label}b: Publish Data Agent")
         publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
+
+        # ── 5c / 6c. Validate Data Agent ──────────────────────────────────
+        print(f"\n✅ {step_label}c: Validate Data Agent")
+        fabric_token = get_fabric_token()
+        validate_dataagent(
+            workspace_id, dataagent_id, args.dataagent_name,
+            lakehouse_id, fabric_token,
+        )
 
         # ── 6 / 7. Semantic Model (default from Lakehouse) ────────────────
         next_step = 6 if args.skip_data_upload else 7
