@@ -12,10 +12,12 @@ Choose the deployment option that fits your scenario:
 | Button | What it deploys | Requirements |
 |---|---|---|
 | [![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — Azure infra + Fabric workspace + Docker images + App Service configuration (~10 min) | GitHub OIDC configured (see Prerequisites) |
-| [![Deploy to Azure](https://aka.ms/deploytoazure)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Finfra%2Fmain.bicep) | **Infra only** — ACR + App Service + Key Vault + Log Analytics (optionally Fabric capacity) via Azure Portal | Azure subscription + Contributor role |
+| [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Infra only** — ACR + App Service + Key Vault + Log Analytics (optionally Fabric capacity) via Azure Portal | Azure subscription + Contributor role |
+| [![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Visualize** — View the ARM template resources and dependencies | — |
 
 > **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
 > **Infra only** button → Azure Portal opens → Fill in parameters → **"Review + create"** → **"Create"**.
+> **Visualize** button → Opens an interactive diagram of the ARM template resources.
 
 ### Full Stack — Required Inputs (6 required, 4 optional)
 
@@ -34,17 +36,48 @@ Choose the deployment option that fits your scenario:
 
 > Resource names are fixed: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`, `kv-cust360-dev`.
 
-### Infra Only — Azure Portal Parameters
+### Infra Only — Azure Portal Parameters (Deploy to Azure)
 
-| Parameter | Default | Notes |
-|---|---|---|
-| `baseName` | `cust360` | Prefix for all resource names |
-| `env` | `dev` | Suffix for all resource names |
-| `location` | Resource group location | Azure region |
-| `fabricSku` | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity |
-| `fabricCapacityAdmins` | *(blank)* | Required when `fabricSku` is set — UPN of a Fabric admin |
+Click the **Deploy to Azure** button above and the Azure Portal will open with a custom deployment form. Fill in the following parameters:
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| **Subscription** | ✅ | — | Select your Azure subscription |
+| **Resource Group** | ✅ | — | Select an existing resource group or create a new one |
+| `baseName` | — | `cust360` | Prefix for all resource names (ACR, App Service, Key Vault, etc.) |
+| `env` | — | `dev` | Environment suffix (e.g. `dev`, `test`, `prod`) |
+| `location` | — | Resource group location | Azure region for all resources |
+| `enablePrivateEndpoints` | — | `false` | Set to `true` to deploy VNet + private endpoints for ACR and Key Vault |
+| `fabricSku` | — | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity. Leave blank to skip. |
+| `fabricCapacityName` | — | *(auto-generated)* | Override the auto-generated Fabric capacity name (lowercase alphanumeric, 3-63 chars) |
+| `fabricCapacityAdmins` | ⚠️ | `[]` | **Required when `fabricSku` is set** — JSON array of admin UPNs, e.g. `["admin@contoso.com"]` |
 
 > After the infra-only deployment, run the **Full stack** workflow with `skip_data_upload=false` to build and deploy the Docker images and set up the Fabric workspace.
+
+### CLI Deployment (alternative)
+
+You can also deploy the ARM template directly via Azure CLI:
+
+```bash
+# Deploy infrastructure only
+az deployment group create \
+  --resource-group <your-resource-group> \
+  --template-file azuredeploy.json \
+  --parameters baseName=cust360 env=dev location=centralindia
+
+# Or with a Fabric capacity
+az deployment group create \
+  --resource-group <your-resource-group> \
+  --template-file azuredeploy.json \
+  --parameters baseName=cust360 env=dev location=centralindia \
+               fabricSku=F2 fabricCapacityAdmins='["admin@contoso.com"]'
+
+# Or using the parameters file
+az deployment group create \
+  --resource-group <your-resource-group> \
+  --template-file azuredeploy.json \
+  --parameters @azuredeploy.parameters.json
+```
 
 ---
 
