@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "9011945562337402813"
+    }
+  },
+  "parameters": {
+    "baseName": {
+      "type": "string",
+      "metadata": {
+        "description": "Base name for resources"
+      }
+    },
+    "env": {
+      "type": "string",
+      "metadata": {
+        "description": "Environment"
+      }
+    },
+    "location": {
+      "type": "string",
+      "metadata": {
+        "description": "Azure region"
+      }
+    },
+    "privateEndpointSubnetId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Private endpoint subnet ID"
+      }
+    }
+  },
+  "variables": {
+    "shortBase": "[substring(parameters('baseName'), 0, min(length(parameters('baseName')), 4))]",
+    "uniqueHash": "[substring(uniqueString(resourceGroup().id), 0, 8)]",
+    "keyVaultName": "[format('kv-{0}-{1}-{2}', variables('shortBase'), parameters('env'), variables('uniqueHash'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('keyVaultName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "sku": {
+          "family": "A",
+          "name": "standard"
+        },
+        "tenantId": "[subscription().tenantId]",
+        "enableRbacAuthorization": true,
+        "enableSoftDelete": true,
+        "enablePurgeProtection": false,
+        "publicNetworkAccess": "[if(not(equals(parameters('privateEndpointSubnetId'), '')), 'Disabled', 'Enabled')]"
+      }
+    }
+  ],
+  "outputs": {
+    "keyVaultName": {
+      "type": "string",
+      "value": "[variables('keyVaultName')]"
+    },
+    "keyVaultUri": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+    }
+  }
+}

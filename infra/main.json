@@ -1,0 +1,873 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.41.2.15936",
+      "templateHash": "10779801062019685160"
+    }
+  },
+  "parameters": {
+    "baseName": {
+      "type": "string",
+      "defaultValue": "cust360",
+      "metadata": {
+        "description": "Base name for all resources"
+      }
+    },
+    "env": {
+      "type": "string",
+      "defaultValue": "dev",
+      "metadata": {
+        "description": "Environment (dev, test, prod)"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for resources"
+      }
+    },
+    "enablePrivateEndpoints": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Enable private endpoints"
+      }
+    },
+    "fabricSku": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Fabric capacity SKU to provision (e.g. F2, F4, F8, F16, F32, F64, F128, F256, F512, F1024, F2048, Trial).\nLeave empty to skip capacity provisioning and use an existing capacity via the deploy workflow input.\n"
+      }
+    },
+    "fabricCapacityName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Override the auto-generated Fabric capacity name (optional). Must be lowercase alphanumeric + hyphens, 3-63 chars, globally unique per region."
+      }
+    },
+    "fabricCapacityAdmins": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "UPNs / email addresses of Fabric capacity admins (required when fabricSku is set). E.g. [\"admin@contoso.com\"]"
+      }
+    }
+  },
+  "variables": {
+    "vnetName": "[format('vnet-{0}-{1}', parameters('baseName'), parameters('env'))]",
+    "logAnalyticsName": "[format('log-{0}-{1}', parameters('baseName'), parameters('env'))]",
+    "resolvedCapacityName": "[if(empty(parameters('fabricCapacityName')), format('cap{0}{1}', replace(toLower(parameters('baseName')), '-', ''), replace(toLower(parameters('env')), '-', '')), parameters('fabricCapacityName'))]"
+  },
+  "resources": [
+    {
+      "condition": "[parameters('enablePrivateEndpoints')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "networking-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "vnetName": {
+            "value": "[variables('vnetName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "baseName": {
+            "value": "[parameters('baseName')]"
+          },
+          "env": {
+            "value": "[parameters('env')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "39888915289236960"
+            }
+          },
+          "parameters": {
+            "vnetName": {
+              "type": "string",
+              "metadata": {
+                "description": "Virtual Network name"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "baseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Base name for resources"
+              }
+            },
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-11-01",
+              "name": "[parameters('vnetName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.0.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "default",
+                    "properties": {
+                      "addressPrefix": "10.0.0.0/24"
+                    }
+                  },
+                  {
+                    "name": "private-endpoints",
+                    "properties": {
+                      "addressPrefix": "10.0.1.0/24",
+                      "privateEndpointNetworkPolicies": "Disabled"
+                    }
+                  }
+                ]
+              }
+            }
+          ],
+          "outputs": {
+            "vnetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+            },
+            "privateEndpointSubnetId": {
+              "type": "string",
+              "value": "[format('{0}/subnets/private-endpoints', resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "monitoring-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "logAnalyticsName": {
+            "value": "[variables('logAnalyticsName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "baseName": {
+            "value": "[parameters('baseName')]"
+          },
+          "env": {
+            "value": "[parameters('env')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "12345816923214666031"
+            }
+          },
+          "parameters": {
+            "logAnalyticsName": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics Workspace name"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "baseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Base name for resources"
+              }
+            },
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment"
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2023-09-01",
+              "name": "[parameters('logAnalyticsName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 30
+              }
+            },
+            {
+              "type": "Microsoft.Insights/components",
+              "apiVersion": "2020-02-02",
+              "name": "[format('appi-{0}-{1}', parameters('baseName'), parameters('env'))]",
+              "location": "[parameters('location')]",
+              "kind": "web",
+              "properties": {
+                "Application_Type": "web",
+                "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "logAnalyticsId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', parameters('logAnalyticsName'))]"
+            },
+            "appInsightsId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Insights/components', format('appi-{0}-{1}', parameters('baseName'), parameters('env')))]"
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Insights/components', format('appi-{0}-{1}', parameters('baseName'), parameters('env'))), '2020-02-02').ConnectionString]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "acr-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "baseName": {
+            "value": "[parameters('baseName')]"
+          },
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "acrSku": {
+            "value": "Basic"
+          },
+          "privateEndpointSubnetId": {
+            "value": "[coalesce(tryGet(if(parameters('enablePrivateEndpoints'), reference(resourceId('Microsoft.Resources/deployments', 'networking-deployment'), '2025-04-01'), null()), 'outputs', 'privateEndpointSubnetId', 'value'), '')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "8519291767323274763"
+            }
+          },
+          "parameters": {
+            "baseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Base name for resources"
+              }
+            },
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "acrSku": {
+              "type": "string",
+              "defaultValue": "Basic",
+              "metadata": {
+                "description": "ACR SKU"
+              }
+            },
+            "privateEndpointSubnetId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Private endpoint subnet ID"
+              }
+            }
+          },
+          "variables": {
+            "shortBase": "[substring(parameters('baseName'), 0, min(length(parameters('baseName')), 4))]",
+            "uniqueHash": "[substring(uniqueString(resourceGroup().id), 0, 6)]",
+            "acrName": "[format('acr{0}{1}{2}', variables('shortBase'), parameters('env'), variables('uniqueHash'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-11-01-preview",
+              "name": "[variables('acrName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "[parameters('acrSku')]"
+              },
+              "properties": {
+                "adminUserEnabled": true,
+                "publicNetworkAccess": "[if(not(equals(parameters('privateEndpointSubnetId'), '')), 'Disabled', 'Enabled')]"
+              }
+            }
+          ],
+          "outputs": {
+            "acrName": {
+              "type": "string",
+              "value": "[variables('acrName')]"
+            },
+            "acrLoginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-11-01-preview').loginServer]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'networking-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "keyvault-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "baseName": {
+            "value": "[parameters('baseName')]"
+          },
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "privateEndpointSubnetId": {
+            "value": "[coalesce(tryGet(if(parameters('enablePrivateEndpoints'), reference(resourceId('Microsoft.Resources/deployments', 'networking-deployment'), '2025-04-01'), null()), 'outputs', 'privateEndpointSubnetId', 'value'), '')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "9011945562337402813"
+            }
+          },
+          "parameters": {
+            "baseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Base name for resources"
+              }
+            },
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "privateEndpointSubnetId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Private endpoint subnet ID"
+              }
+            }
+          },
+          "variables": {
+            "shortBase": "[substring(parameters('baseName'), 0, min(length(parameters('baseName')), 4))]",
+            "uniqueHash": "[substring(uniqueString(resourceGroup().id), 0, 8)]",
+            "keyVaultName": "[format('kv-{0}-{1}-{2}', variables('shortBase'), parameters('env'), variables('uniqueHash'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.KeyVault/vaults",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('keyVaultName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "sku": {
+                  "family": "A",
+                  "name": "standard"
+                },
+                "tenantId": "[subscription().tenantId]",
+                "enableRbacAuthorization": true,
+                "enableSoftDelete": true,
+                "enablePurgeProtection": false,
+                "publicNetworkAccess": "[if(not(equals(parameters('privateEndpointSubnetId'), '')), 'Disabled', 'Enabled')]"
+              }
+            }
+          ],
+          "outputs": {
+            "keyVaultName": {
+              "type": "string",
+              "value": "[variables('keyVaultName')]"
+            },
+            "keyVaultUri": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'networking-deployment')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "appservices-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "baseName": {
+            "value": "[parameters('baseName')]"
+          },
+          "env": {
+            "value": "[parameters('env')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "logAnalyticsId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring-deployment'), '2025-04-01').outputs.logAnalyticsId.value]"
+          },
+          "acrName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'acr-deployment'), '2025-04-01').outputs.acrName.value]"
+          },
+          "keyVaultName": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault-deployment'), '2025-04-01').outputs.keyVaultName.value]"
+          },
+          "appInsightsConnectionString": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring-deployment'), '2025-04-01').outputs.appInsightsConnectionString.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "18386948151185119013"
+            }
+          },
+          "parameters": {
+            "baseName": {
+              "type": "string",
+              "metadata": {
+                "description": "Base name for resources"
+              }
+            },
+            "env": {
+              "type": "string",
+              "metadata": {
+                "description": "Environment"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region"
+              }
+            },
+            "logAnalyticsId": {
+              "type": "string",
+              "metadata": {
+                "description": "Log Analytics ID"
+              }
+            },
+            "acrName": {
+              "type": "string",
+              "metadata": {
+                "description": "Container Registry name"
+              }
+            },
+            "keyVaultName": {
+              "type": "string",
+              "metadata": {
+                "description": "Key Vault name"
+              }
+            },
+            "appInsightsConnectionString": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Application Insights connection string for backend telemetry"
+              }
+            }
+          },
+          "variables": {
+            "backendAppName": "[format('app-{0}-backend-{1}', parameters('baseName'), parameters('env'))]",
+            "frontendAppName": "[format('app-{0}-frontend-{1}', parameters('baseName'), parameters('env'))]",
+            "appServicePlanName": "[format('plan-{0}-{1}', parameters('baseName'), parameters('env'))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Web/serverfarms",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('appServicePlanName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "B1",
+                "tier": "Basic",
+                "capacity": 1
+              },
+              "kind": "linux",
+              "properties": {
+                "reserved": true
+              }
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('backendAppName')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "siteConfig": {
+                  "linuxFxVersion": "DOCKER|nginx:alpine",
+                  "acrUseManagedIdentityCreds": true,
+                  "appSettings": [
+                    {
+                      "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
+                      "value": "false"
+                    },
+                    {
+                      "name": "DOCKER_REGISTRY_SERVER_URL",
+                      "value": "[format('https://{0}.azurecr.io', parameters('acrName'))]"
+                    },
+                    {
+                      "name": "DOCKER_ENABLE_CI",
+                      "value": "true"
+                    },
+                    {
+                      "name": "KEYVAULT_URL",
+                      "value": "[format('https://{0}{1}/', parameters('keyVaultName'), environment().suffixes.keyvaultDns)]"
+                    },
+                    {
+                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+                      "value": "[parameters('appInsightsConnectionString')]"
+                    }
+                  ]
+                },
+                "httpsOnly": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Web/sites",
+              "apiVersion": "2023-12-01",
+              "name": "[variables('frontendAppName')]",
+              "location": "[parameters('location')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "properties": {
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]",
+                "siteConfig": {
+                  "linuxFxVersion": "DOCKER|nginx:alpine",
+                  "acrUseManagedIdentityCreds": true,
+                  "appSettings": [
+                    {
+                      "name": "WEBSITES_ENABLE_APP_SERVICE_STORAGE",
+                      "value": "false"
+                    },
+                    {
+                      "name": "DOCKER_REGISTRY_SERVER_URL",
+                      "value": "[format('https://{0}.azurecr.io', parameters('acrName'))]"
+                    },
+                    {
+                      "name": "DOCKER_ENABLE_CI",
+                      "value": "true"
+                    }
+                  ]
+                },
+                "httpsOnly": true
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('appServicePlanName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+              "name": "[guid(resourceId('Microsoft.Web/sites', variables('backendAppName')), resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), 'AcrPull')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('backendAppName')), '2023-12-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('backendAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName'))]",
+              "name": "[guid(resourceId('Microsoft.Web/sites', variables('frontendAppName')), resourceId('Microsoft.ContainerRegistry/registries', parameters('acrName')), 'AcrPull')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('frontendAppName')), '2023-12-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('frontendAppName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.Web/sites', variables('backendAppName')), resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'KeyVaultSecretsUser')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('backendAppName')), '2023-12-01', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Web/sites', variables('backendAppName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "backendAppName": {
+              "type": "string",
+              "value": "[variables('backendAppName')]"
+            },
+            "frontendAppName": {
+              "type": "string",
+              "value": "[variables('frontendAppName')]"
+            },
+            "backendAppPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('backendAppName')), '2023-12-01', 'full').identity.principalId]"
+            },
+            "frontendAppPrincipalId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Web/sites', variables('frontendAppName')), '2023-12-01', 'full').identity.principalId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', 'acr-deployment')]",
+        "[resourceId('Microsoft.Resources/deployments', 'keyvault-deployment')]",
+        "[resourceId('Microsoft.Resources/deployments', 'monitoring-deployment')]"
+      ]
+    },
+    {
+      "condition": "[not(empty(parameters('fabricSku')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "fabric-capacity-deployment",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "capacityName": {
+            "value": "[variables('resolvedCapacityName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "fabricSku": {
+            "value": "[parameters('fabricSku')]"
+          },
+          "adminMembers": {
+            "value": "[parameters('fabricCapacityAdmins')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "13683094896258390625"
+            }
+          },
+          "parameters": {
+            "capacityName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name for the Fabric capacity (lowercase alphanumeric and hyphens, 3-63 chars, globally unique per region)"
+              }
+            },
+            "location": {
+              "type": "string",
+              "metadata": {
+                "description": "Azure region for the Fabric capacity"
+              }
+            },
+            "fabricSku": {
+              "type": "string",
+              "allowedValues": [
+                "F2",
+                "F4",
+                "F8",
+                "F16",
+                "F32",
+                "F64",
+                "F128",
+                "F256",
+                "F512",
+                "F1024",
+                "F2048",
+                "Trial"
+              ],
+              "metadata": {
+                "description": "Fabric capacity SKU.\nF2–F2048  : paid Fabric compute SKUs (F2, F4, F8, F16, F32, F64, F128, F256, F512, F1024, F2048)\nTrial     : free 60-day trial (maps to F1 / Trial tier, one per tenant)\n"
+              }
+            },
+            "adminMembers": {
+              "type": "array",
+              "metadata": {
+                "description": "UPNs / email addresses of Fabric capacity administrators (at least one required)"
+              }
+            }
+          },
+          "variables": {
+            "skuName": "[if(equals(parameters('fabricSku'), 'Trial'), 'F1', parameters('fabricSku'))]",
+            "skuTier": "[if(equals(parameters('fabricSku'), 'Trial'), 'Trial', 'Fabric')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Fabric/capacities",
+              "apiVersion": "2023-11-01",
+              "name": "[parameters('capacityName')]",
+              "location": "[parameters('location')]",
+              "sku": {
+                "name": "[variables('skuName')]",
+                "tier": "[variables('skuTier')]"
+              },
+              "properties": {
+                "administration": {
+                  "members": "[parameters('adminMembers')]"
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "capacityName": {
+              "type": "string",
+              "value": "[parameters('capacityName')]"
+            },
+            "capacityAzureResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Fabric/capacities', parameters('capacityName'))]"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "acrName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'acr-deployment'), '2025-04-01').outputs.acrName.value]"
+    },
+    "keyVaultName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault-deployment'), '2025-04-01').outputs.keyVaultName.value]"
+    },
+    "backendAppName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appservices-deployment'), '2025-04-01').outputs.backendAppName.value]"
+    },
+    "frontendAppName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'appservices-deployment'), '2025-04-01').outputs.frontendAppName.value]"
+    },
+    "logAnalyticsWorkspaceId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring-deployment'), '2025-04-01').outputs.logAnalyticsId.value]"
+    },
+    "vnetId": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('enablePrivateEndpoints'), reference(resourceId('Microsoft.Resources/deployments', 'networking-deployment'), '2025-04-01'), null()), 'outputs', 'vnetId', 'value'), '')]"
+    },
+    "fabricCapacityName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(not(empty(parameters('fabricSku'))), reference(resourceId('Microsoft.Resources/deployments', 'fabric-capacity-deployment'), '2025-04-01'), null()), 'outputs', 'capacityName', 'value'), '')]"
+    }
+  }
+}
