@@ -403,16 +403,16 @@ async def status() -> Dict[str, Any]:
                         )
                     if assistants_probe.status_code != 404:
                         logger.info(
-                            "Status probe: Assistants API (%s %s) returned HTTP %d — agent is reachable.",
-                            method, assistants_url.split("/dataAgents/")[-1],
+                            "Status probe: Assistants API (%s) returned HTTP %d — agent is reachable.",
+                            method,
                             assistants_probe.status_code,
                         )
                         agent_reachable = True
                         break
                     else:
                         logger.debug(
-                            "Status probe: %s %s returned 404 — trying next variant.",
-                            method, assistants_url.split("/dataAgents/")[-1],
+                            "Status probe: %s returned 404 — trying next variant.",
+                            method,
                         )
                 except Exception as asst_exc:
                     logger.warning("Assistants API probe failed (non-fatal): %s", asst_exc)

@@ -282,7 +282,7 @@ class FabricClient:
                     json=payload,
                     timeout=120,
                 )
-                if resp.ok or resp.status_code != 404:
+                if resp.status_code != 404:
                     return resp
                 logger.debug(
                     "OpenAI-compat %s returned 404 — trying next variant", url,
