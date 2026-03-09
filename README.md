@@ -12,7 +12,7 @@ Choose the deployment option that fits your scenario:
 | Button | What it deploys | Requirements |
 |---|---|---|
 | [![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — Azure infra + Fabric workspace + Docker images + App Service configuration (~10 min) | GitHub OIDC configured (see Prerequisites) |
-| [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Infra only** — ACR + App Service + Key Vault + Log Analytics (optionally Fabric capacity) via Azure Portal | Azure subscription + Contributor role |
+| [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Infra only** — ACR + App Service + Log Analytics (optionally Fabric capacity) via Azure Portal | Azure subscription + Contributor role |
 | [![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Visualize** — View the ARM template resources and dependencies | — |
 
 > **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
@@ -34,7 +34,7 @@ Choose the deployment option that fits your scenario:
 | `skip_data_upload` | — | Set `true` if customer data is already loaded |
 | `powerbi_report_url` | — | Leave blank on first deploy; add the embed URL on re-run |
 
-> Resource names are fixed: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`, `kv-cust360-dev`.
+> Resource names are fixed: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`.
 
 ### Infra Only — Azure Portal Parameters (Deploy to Azure)
 
@@ -44,10 +44,10 @@ Click the **Deploy to Azure** button above and the Azure Portal will open with a
 |---|---|---|---|
 | **Subscription** | ✅ | — | Select your Azure subscription |
 | **Resource Group** | ✅ | — | Select an existing resource group or create a new one |
-| `baseName` | — | `cust360` | Prefix for all resource names (ACR, App Service, Key Vault, etc.) |
+| `baseName` | — | `cust360` | Prefix for all resource names (ACR, App Service, etc.) |
 | `env` | — | `dev` | Environment suffix (e.g. `dev`, `test`, `prod`) |
 | `location` | — | Resource group location | Azure region for all resources |
-| `enablePrivateEndpoints` | — | `false` | Set to `true` to deploy VNet + private endpoints for ACR and Key Vault |
+| `enablePrivateEndpoints` | — | `false` | Set to `true` to deploy VNet + private endpoints for ACR |
 | `fabricSku` | — | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity. Leave blank to skip. |
 | `fabricCapacityName` | — | *(auto-generated)* | Override the auto-generated Fabric capacity name (lowercase alphanumeric, 3-63 chars) |
 | `fabricCapacityAdmins` | ⚠️ | `[]` | **Required when `fabricSku` is set** — JSON array of admin UPNs, e.g. `["admin@contoso.com"]` |
@@ -135,7 +135,6 @@ Customer CSV
 | App Service Plan (B1 Linux) | Runs both apps |
 | Backend App Service | FastAPI → Fabric Data Agent |
 | Frontend App Service | React chat + Power BI embed |
-| Key Vault | Secrets management |
 | Log Analytics + App Insights | Monitoring |
 
 ### Fabric Resources (automated via Python)
@@ -320,7 +319,6 @@ GitHub Actions (OIDC)  →  Azure Login (no stored secrets)
 Azure App Service (Managed Identity)
         │
         └──► Fabric Data Agent API  (token: api.fabric.microsoft.com)
-        └──► Azure Key Vault        (secrets)
         └──► ACR                    (container pull)
 ```
 

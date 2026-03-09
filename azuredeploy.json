@@ -381,104 +381,6 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
-      "name": "keyvault-deployment",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "baseName": {
-            "value": "[parameters('baseName')]"
-          },
-          "env": {
-            "value": "[parameters('env')]"
-          },
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "privateEndpointSubnetId": {
-            "value": "[coalesce(tryGet(if(parameters('enablePrivateEndpoints'), reference(resourceId('Microsoft.Resources/deployments', 'networking-deployment'), '2025-04-01'), null()), 'outputs', 'privateEndpointSubnetId', 'value'), '')]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "5614163034223877987"
-            }
-          },
-          "parameters": {
-            "baseName": {
-              "type": "string",
-              "metadata": {
-                "description": "Base name for resources"
-              }
-            },
-            "env": {
-              "type": "string",
-              "metadata": {
-                "description": "Environment"
-              }
-            },
-            "location": {
-              "type": "string",
-              "metadata": {
-                "description": "Azure region"
-              }
-            },
-            "privateEndpointSubnetId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Private endpoint subnet ID"
-              }
-            }
-          },
-          "variables": {
-            "shortBase": "[substring(parameters('baseName'), 0, min(length(parameters('baseName')), 4))]",
-            "uniqueHash": "[substring(uniqueString(resourceGroup().id), 0, 8)]",
-            "keyVaultName": "[format('kv-{0}-{1}-{2}', variables('shortBase'), parameters('env'), variables('uniqueHash'))]"
-          },
-          "resources": [
-            {
-              "type": "Microsoft.KeyVault/vaults",
-              "apiVersion": "2023-07-01",
-              "name": "[variables('keyVaultName')]",
-              "location": "[parameters('location')]",
-              "properties": {
-                "sku": {
-                  "family": "A",
-                  "name": "standard"
-                },
-                "tenantId": "[subscription().tenantId]",
-                "enableRbacAuthorization": true,
-                "publicNetworkAccess": "[if(not(equals(parameters('privateEndpointSubnetId'), '')), 'Disabled', 'Enabled')]"
-              }
-            }
-          ],
-          "outputs": {
-            "keyVaultName": {
-              "type": "string",
-              "value": "[variables('keyVaultName')]"
-            },
-            "keyVaultUri": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), '2023-07-01').vaultUri]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[resourceId('Microsoft.Resources/deployments', 'networking-deployment')]"
-      ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
       "name": "appservices-deployment",
       "properties": {
         "expressionEvaluationOptions": {
@@ -500,9 +402,6 @@
           },
           "acrName": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'acr-deployment'), '2025-04-01').outputs.acrName.value]"
-          },
-          "keyVaultName": {
-            "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault-deployment'), '2025-04-01').outputs.keyVaultName.value]"
           },
           "appInsightsConnectionString": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', 'monitoring-deployment'), '2025-04-01').outputs.appInsightsConnectionString.value]"
@@ -547,12 +446,6 @@
               "type": "string",
               "metadata": {
                 "description": "Container Registry name"
-              }
-            },
-            "keyVaultName": {
-              "type": "string",
-              "metadata": {
-                "description": "Key Vault name"
               }
             },
             "appInsightsConnectionString": {
@@ -609,10 +502,6 @@
                     {
                       "name": "DOCKER_ENABLE_CI",
                       "value": "true"
-                    },
-                    {
-                      "name": "KEYVAULT_URL",
-                      "value": "[format('https://{0}{1}/', parameters('keyVaultName'), environment().suffixes.keyvaultDns)]"
                     },
                     {
                       "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -687,20 +576,6 @@
               "dependsOn": [
                 "[resourceId('Microsoft.Web/sites', variables('frontendAppName'))]"
               ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
-              "name": "[guid(resourceId('Microsoft.Web/sites', variables('backendAppName')), resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), 'KeyVaultSecretsUser')]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
-                "principalId": "[reference(resourceId('Microsoft.Web/sites', variables('backendAppName')), '2023-12-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Web/sites', variables('backendAppName'))]"
-              ]
             }
           ],
           "outputs": {
@@ -725,7 +600,6 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', 'acr-deployment')]",
-        "[resourceId('Microsoft.Resources/deployments', 'keyvault-deployment')]",
         "[resourceId('Microsoft.Resources/deployments', 'monitoring-deployment')]"
       ]
     },
@@ -842,10 +716,6 @@
     "acrName": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Resources/deployments', 'acr-deployment'), '2025-04-01').outputs.acrName.value]"
-    },
-    "keyVaultName": {
-      "type": "string",
-      "value": "[reference(resourceId('Microsoft.Resources/deployments', 'keyvault-deployment'), '2025-04-01').outputs.keyVaultName.value]"
     },
     "backendAppName": {
       "type": "string",

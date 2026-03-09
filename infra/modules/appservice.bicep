@@ -13,9 +13,6 @@ param logAnalyticsId string
 @description('Container Registry name')
 param acrName string
 
-@description('Key Vault name')
-param keyVaultName string
-
 @description('Application Insights connection string for backend telemetry')
 param appInsightsConnectionString string = ''
 
@@ -63,10 +60,6 @@ resource backendApp 'Microsoft.Web/sites@2023-12-01' = {
           value: 'true'
         }
         {
-          name: 'KEYVAULT_URL'
-          value: 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/'
-        }
-        {
           // Populated by GitHub Actions post-deploy step
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsightsConnectionString
@@ -112,10 +105,6 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existin
   name: acrName
 }
 
-resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
-  name: keyVaultName
-}
-
 resource backendAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(backendApp.id, acr.id, 'AcrPull')
   scope: acr
@@ -132,16 +121,6 @@ resource frontendAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
     principalId: frontendApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource backendKvSecretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(backendApp.id, keyVault.id, 'KeyVaultSecretsUser')
-  scope: keyVault
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
-    principalId: backendApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
 }
