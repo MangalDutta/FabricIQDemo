@@ -11,6 +11,7 @@ import requests as _requests
 from azure.identity import DefaultAzureCredential
 
 from fabric_client import AgentNotReadyError, FabricClient
+from fabric_agent_client import FabricAgentClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("customer360-backend")
@@ -36,6 +37,16 @@ try:
 except Exception as ex:
     logger.error(f"Failed to initialize Fabric client: {ex}")
     fabric_client = None
+
+# OpenAI-Assistants-API client for advanced interactions (threads, runs, SQL
+# extraction, draft-vs-production comparison).  Uses the same Managed Identity
+# and workspace/agent env vars as fabric_client.
+try:
+    agent_client = FabricAgentClient()
+    logger.info("✓ Fabric Agent (Assistants API) client initialized")
+except Exception as ex:
+    logger.warning(f"FabricAgentClient init failed (non-fatal): {ex}")
+    agent_client = None
 
 # Shared credential for Power BI token endpoint (reuses the same Managed Identity)
 try:
@@ -655,6 +666,145 @@ async def chat(request: Request) -> Dict[str, Any]:
     except Exception as ex:
         logger.exception(f"Chat error: {ex}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(ex)}")
+
+# ─── Advanced Agent endpoints (OpenAI Assistants API) ─────────────────────────
+# These endpoints use the FabricAgentClient which provides richer capabilities
+# than the simple REST wrapper: persistent threads, run-step introspection,
+# SQL query extraction, and draft-vs-production comparison.
+
+
+@app.post("/api/agent/ask")
+async def agent_ask(request: Request) -> Dict[str, Any]:
+    """Ask a question via the OpenAI Assistants API, with optional thread persistence.
+
+    Request body::
+
+        {
+            "question": str,            # required
+            "thread_name": str | null,  # optional – reuse a named thread
+            "timeout": int              # optional – seconds (default 120)
+        }
+    """
+    if not agent_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Fabric Agent (Assistants API) client not configured. "
+            "Ensure FABRIC_WORKSPACE_ID and FABRIC_DATAAGENT_ID are set.",
+        )
+
+    body = await request.json()
+    question = body.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="'question' field is required")
+
+    thread_name = body.get("thread_name")
+    timeout = int(body.get("timeout", 120))
+
+    try:
+        answer = agent_client.ask(
+            question=question, timeout=timeout, thread_name=thread_name
+        )
+        return {"answer": answer, "question": question}
+    except Exception as ex:
+        logger.exception("agent/ask error: %s", ex)
+        raise HTTPException(status_code=500, detail=str(ex))
+
+
+@app.post("/api/agent/run-details")
+async def agent_run_details(request: Request) -> Dict[str, Any]:
+    """Ask a question and return detailed run info (steps, SQL queries, data previews).
+
+    Request body::
+
+        {
+            "question": str,
+            "thread_name": str | null,
+            "timeout": int
+        }
+    """
+    if not agent_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Fabric Agent (Assistants API) client not configured.",
+        )
+
+    body = await request.json()
+    question = body.get("question", "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="'question' field is required")
+
+    thread_name = body.get("thread_name")
+    timeout = int(body.get("timeout", 120))
+
+    try:
+        details = agent_client.get_run_details(
+            question=question, timeout=timeout, thread_name=thread_name
+        )
+        return details
+    except Exception as ex:
+        logger.exception("agent/run-details error: %s", ex)
+        raise HTTPException(status_code=500, detail=str(ex))
+
+
+@app.post("/api/agent/compare")
+async def agent_compare(request: Request) -> Dict[str, Any]:
+    """Compare responses from a draft agent and a production agent.
+
+    This implements the pattern described in the Fabric.guru article
+    *"Programmatically comparing draft vs production Fabric Data Agent
+    responses"*.
+
+    Request body::
+
+        {
+            "question": str,                  # required
+            "draft_agent_id": str,            # required — Fabric item GUID
+            "production_agent_id": str,       # required — Fabric item GUID
+            "timeout": int                    # optional (default 120)
+        }
+
+    Returns::
+
+        {
+            "question": str,
+            "draft":      { "answer", "run_status", "sql_queries", "error" },
+            "production": { "answer", "run_status", "sql_queries", "error" },
+            "match": bool,
+            "timestamp": float
+        }
+    """
+    if not agent_client:
+        raise HTTPException(
+            status_code=503,
+            detail="Fabric Agent (Assistants API) client not configured.",
+        )
+
+    body = await request.json()
+    question = body.get("question", "").strip()
+    draft_id = body.get("draft_agent_id", "").strip()
+    production_id = body.get("production_agent_id", "").strip()
+    timeout = int(body.get("timeout", 120))
+
+    if not question:
+        raise HTTPException(status_code=400, detail="'question' is required")
+    if not draft_id or not production_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Both 'draft_agent_id' and 'production_agent_id' are required",
+        )
+
+    try:
+        result = agent_client.compare_draft_vs_production(
+            question=question,
+            draft_agent_id=draft_id,
+            production_agent_id=production_id,
+            timeout=timeout,
+        )
+        return result
+    except Exception as ex:
+        logger.exception("agent/compare error: %s", ex)
+        raise HTTPException(status_code=500, detail=str(ex))
+
 
 if __name__ == "__main__":
     import uvicorn
