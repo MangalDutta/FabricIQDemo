@@ -499,13 +499,29 @@ jobs:
 
           echo "Query endpoint returned HTTP $QUERY_STATUS"
           if [ "$QUERY_STATUS" = "404" ]; then
-            echo "⚠️  Query endpoint returned 404 — agent is NOT queryable."
-            echo "   The smoke test chat check will likely fail."
-            echo "   This usually means the agent needs to be Published in the Fabric portal."
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════════╗"
+            echo "║  ⚠️  ACTION REQUIRED — Agent query endpoint returned 404        ║"
+            echo "╠══════════════════════════════════════════════════════════════════╣"
+            echo "║  The agent exists but is NOT queryable (Draft/unpublished).     ║"
+            echo "║  The automated publish API is not yet available on this tenant. ║"
+            echo "║                                                                  ║"
+            echo "║  MANUAL STEPS (takes ~1 minute):                                ║"
+            echo "║  1. Open the Fabric portal workspace:                            ║"
+            echo "║     https://app.fabric.microsoft.com/groups/$WORKSPACE_ID       ║"
+            echo "║  2. Click on 'Customer360Agent' in the item list                 ║"
+            echo "║  3. Click 'Publish' in the top ribbon                            ║"
+            echo "║  4. Wait for the green 'Published' badge to appear               ║"
+            echo "║                                                                  ║"
+            echo "║  After publishing, the frontend chat will work immediately.      ║"
+            echo "╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "Agent ID (for reference): $DATAAGENT_ID"
+            echo "Workspace URL: https://app.fabric.microsoft.com/groups/$WORKSPACE_ID"
           elif [ "$QUERY_STATUS" = "000" ]; then
-            echo "⚠️  Could not reach the query endpoint."
+            echo "⚠️  Could not reach the query endpoint (network error)."
           else
-            echo "✓ Query endpoint is reachable (HTTP $QUERY_STATUS)."
+            echo "✓ Query endpoint is reachable (HTTP $QUERY_STATUS) — agent is ready."
           fi
 
       # --- Smoke Test (optional - runs against deployed apps) ---

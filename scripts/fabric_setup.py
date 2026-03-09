@@ -677,18 +677,42 @@ def load_table_from_file(
 
 def _validate_agent(workspace_id: str, agent_id: str, token: str) -> bool:
     """
-    Returns True if GET /dataAgents/{agent_id} succeeds (agent is queryable).
-    A listed agent can be in a broken/incomplete state (e.g. created via the
-    generic Items API without proper initialisation); validating before using
-    the ID prevents stale IDs propagating into the App Service setting.
+    Returns True only if the agent is reachable AND queryable (query endpoint
+    returns non-404).
+
+    A Draft agent returns HTTP 200 on the metadata GET but 404 on the /query
+    endpoint. Checking only GET would treat Draft agents as valid, causing
+    every re-deploy to reuse a stale Draft agent instead of deleting/recreating
+    it.  Probing /query gives ground truth.
     """
     try:
-        resp = requests.get(
+        # Step 1: metadata GET must succeed
+        get_resp = requests.get(
             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
-        return resp.ok
+        if not get_resp.ok:
+            return False
+
+        # Step 2: probe the query endpoint — Draft agents return 404 here
+        probe = requests.post(
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/query",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"userMessage": "ping"},
+            timeout=15,
+        )
+        if probe.status_code == 404:
+            print(
+                f"   ⚠️  Agent {agent_id} metadata OK but query endpoint returned 404 "
+                f"— agent is in Draft/unpublished state (not queryable)."
+            )
+            return False
+        # Any non-404 response (200, 400, 500) means the query endpoint is reachable
+        return True
     except Exception:
         return False
 
@@ -811,6 +835,11 @@ def get_or_create_dataagent(
                 agent_id = create_resp.json().get("id")
                 if agent_id:
                     print(f"✓ Created Data Agent: {dataagent_name} (ID: {agent_id})")
+                    # Newly created agents are in Draft state.  Wait briefly for
+                    # Fabric to finish internal provisioning before publishing.
+                    print("   Waiting 15s for agent to finish provisioning...")
+                    time.sleep(15)
+                    _try_publish_dataagent(workspace_id, agent_id, dataagent_name, token)
                     return agent_id
             elif create_resp.status_code == 202:
                 op_id = create_resp.headers.get("x-ms-operation-id")
@@ -826,6 +855,9 @@ def get_or_create_dataagent(
                     if agent.get("displayName") == dataagent_name:
                         agent_id = agent["id"]
                         print(f"✓ Data Agent ready: {dataagent_name} (ID: {agent_id})")
+                        print("   Waiting 15s for agent to finish provisioning...")
+                        time.sleep(15)
+                        _try_publish_dataagent(workspace_id, agent_id, dataagent_name, token)
                         return agent_id
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Dedicated dataAgents endpoint failed: {exc}")
@@ -1159,42 +1191,95 @@ def _try_publish_dataagent(
     token: str,
 ) -> bool:
     """
-    Internal helper: attempts to publish the Data Agent via known endpoints.
-    Returns True if any endpoint returned a success status, False otherwise.
-    Non-fatal — callers should continue even on failure.
+    Attempts to publish the Data Agent via every known API path.
+    Returns True if any method succeeds, False otherwise.  Non-fatal.
+
+    Tries (in order):
+      1. POST  /dataAgents/{id}/publish
+      2. POST  /dataAgents/{id}/activate
+      3. POST  /items/{id}/publish          (generic items publish)
+      4. POST  /items/{id}/deploy
+      5. PATCH /dataAgents/{id}  {"publishState": "Published"}
+      6. PATCH /dataAgents/{id}  {"state": "Published"}
+    Each attempt is retried once after a 10s delay to handle transient
+    "agent still provisioning" 404s.
     """
     req_headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
     }
-    publish_endpoints = [
-        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/publish",
-        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/activate",
-        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items/{agent_id}/publish",
+    base = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+
+    # ── POST-based publish endpoints ─────────────────────────────────────────
+    post_endpoints = [
+        f"{base}/dataAgents/{agent_id}/publish",
+        f"{base}/dataAgents/{agent_id}/activate",
+        f"{base}/items/{agent_id}/publish",
+        f"{base}/items/{agent_id}/deploy",
     ]
-    for url in publish_endpoints:
+    for url in post_endpoints:
+        for attempt in (1, 2):   # retry once after 10s
+            try:
+                resp = requests.post(url, headers=req_headers, json={}, timeout=60)
+                if resp.status_code in (200, 201, 204):
+                    print(f"   ✓ Agent published via POST {url.split('/')[-1]} (HTTP {resp.status_code}).")
+                    return True
+                if resp.status_code == 202:
+                    op_id = (
+                        resp.headers.get("x-ms-operation-id")
+                        or resp.headers.get("x-ms-operationid")
+                    )
+                    if op_id:
+                        try:
+                            poll_operation(op_id, token, "data agent publish")
+                        except Exception:
+                            pass
+                    print(f"   ✓ Agent publish accepted (202) via POST {url.split('/')[-1]}.")
+                    return True
+                if resp.status_code == 409:
+                    print("   Agent already published (409 Conflict) — treating as success.")
+                    return True
+                if resp.status_code == 404 and attempt == 1:
+                    # Agent may still be provisioning — wait and retry once
+                    print(f"   404 from {url.split('/')[-1]}, retrying in 10s...")
+                    time.sleep(10)
+                    continue
+                # Any other error — try next endpoint
+                print(f"   [INFO] POST {url.split('/')[-1]} → HTTP {resp.status_code}: {resp.text[:120]}")
+                break
+            except Exception as exc:
+                print(f"   [WARN] POST {url.split('/')[-1]} exception: {exc}")
+                break
+
+    # ── PATCH-based publish (set publishState / state field directly) ─────────
+    patch_payloads = [
+        {"publishState": "Published"},
+        {"state": "Published"},
+        {"status": "Published"},
+    ]
+    patch_url = f"{base}/dataAgents/{agent_id}"
+    for payload in patch_payloads:
+        field = list(payload.keys())[0]
         try:
-            resp = requests.post(url, headers=req_headers, json={}, timeout=60)
+            resp = requests.patch(patch_url, headers=req_headers, json=payload, timeout=60)
             if resp.status_code in (200, 201, 204):
-                print(f"   ✓ Agent published via {url.split('/')[-1]} (HTTP {resp.status_code}).")
+                print(f"   ✓ Agent published via PATCH {field}=Published (HTTP {resp.status_code}).")
                 return True
             if resp.status_code == 202:
-                op_id = (
-                    resp.headers.get("x-ms-operation-id")
-                    or resp.headers.get("x-ms-operationid")
-                )
-                if op_id:
-                    try:
-                        poll_operation(op_id, token, "data agent publish")
-                    except Exception:
-                        pass
-                print(f"   ✓ Agent publish accepted (202) via {url.split('/')[-1]}.")
+                print(f"   ✓ Agent PATCH publish accepted (202) via {field}.")
                 return True
-            if resp.status_code == 409:
-                print(f"   Agent already published (409 Conflict) — treating as success.")
-                return True
+            # 400/404/405 = field not accepted — try next
+            print(f"   [INFO] PATCH {field}=Published → HTTP {resp.status_code}: {resp.text[:100]}")
         except Exception as exc:
-            print(f"   [WARN] Publish via {url.split('/')[-1]} exception: {exc}")
+            print(f"   [WARN] PATCH {field}=Published exception: {exc}")
+
+    print(
+        f"   [INFO] All publish attempts returned 404/400/405 — "
+        f"the Fabric publish API may not be available on this tenant yet.\n"
+        f"   Manual action required: open the Fabric portal, find '{agent_name}',\n"
+        f"   and click 'Publish' in the top ribbon.\n"
+        f"   Direct link: https://app.fabric.microsoft.com/groups/{workspace_id}"
+    )
     return False
 
 
