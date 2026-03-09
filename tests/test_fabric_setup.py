@@ -525,7 +525,7 @@ class TestConfigureDataagent:
         assert ds.get("itemId") == "lh1"
 
     def test_skips_patch_when_already_linked_and_published(self):
-        """When agent is already linked to the correct Lakehouse and published, skip PATCH."""
+        """When agent is already linked to the correct data source and published, skip PATCH."""
         get_resp = _ok_response({
             "id": "ag1",
             "displayName": "Agent",
@@ -540,6 +540,40 @@ class TestConfigureDataagent:
              patch("requests.request") as mock_req:
             fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
         # PATCH should NOT have been called
+        mock_req.assert_not_called()
+
+    def test_uses_semantic_model_type_when_sm_id_provided(self):
+        """When semantic_model_id is given, data source type should be SemanticModel."""
+        ok_resp = _ok_response({}, 200)
+        with patch("requests.request", return_value=ok_resp) as mock_req:
+            fs.configure_dataagent(
+                "ws1", "ag1", "Agent", "lh1", "Customer360", "tok",
+                semantic_model_id="sm-1",
+            )
+        first_call_kwargs = mock_req.call_args_list[0][1]
+        body = first_call_kwargs.get("json", {})
+        ds = body.get("configuration", {}).get("dataSources", [{}])[0]
+        assert ds.get("type") == "SemanticModel"
+        assert ds.get("itemId") == "sm-1"
+
+    def test_skips_patch_when_semantic_model_already_linked(self):
+        """When agent is already linked to the correct SemanticModel, skip PATCH."""
+        get_resp = _ok_response({
+            "id": "ag1",
+            "displayName": "Agent",
+            "state": "Active",
+            "configuration": {
+                "dataSources": [
+                    {"type": "SemanticModel", "workspaceId": "ws1", "itemId": "sm-1"}
+                ]
+            },
+        }, 200)
+        with patch("requests.get", return_value=get_resp), \
+             patch("requests.request") as mock_req:
+            fs.configure_dataagent(
+                "ws1", "ag1", "Agent", "lh1", "Customer360", "tok",
+                semantic_model_id="sm-1",
+            )
         mock_req.assert_not_called()
 
 
@@ -590,6 +624,23 @@ class TestValidateDataagent:
              patch("fabric_setup._is_agent_queryable", return_value=True):
             result = fs.validate_dataagent("ws1", "ag1", "Agent", "lh1", "tok")
         assert result is False
+
+    def test_validates_semantic_model_linkage(self):
+        """validate_dataagent checks semantic model when semantic_model_id is given."""
+        get_resp = _ok_response({
+            "id": "ag1",
+            "configuration": {
+                "dataSources": [{"itemId": "sm-1"}]
+            },
+        }, 200)
+        with patch("fabric_setup._validate_agent", return_value=True), \
+             patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=True):
+            result = fs.validate_dataagent(
+                "ws1", "ag1", "Agent", "lh1", "tok",
+                semantic_model_id="sm-1",
+            )
+        assert result is True
 
 
 # ─── trigger_default_semantic_model ──────────────────────────────────────────
