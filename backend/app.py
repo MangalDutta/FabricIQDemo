@@ -343,12 +343,26 @@ async def status() -> Dict[str, Any]:
             f"/workspaces/{workspace_id}"
             f"/dataAgents/{fabric_client.dataagent_id}/query"
         )
-        assistants_url = (
-            f"https://api.fabric.microsoft.com/v1"
-            f"/workspaces/{workspace_id}"
-            f"/dataAgents/{fabric_client.dataagent_id}"
-            f"/aiassistant/openai/assistants"
-        )
+        # Probe URLs for the Assistants API.  The /assistants path (list
+        # assistants) can return 404 even on working agents, so we also try
+        # the OpenAI-compat chat-completion path (POST with messages), which
+        # matches the endpoint used by the actual chat fallback.
+        assistants_probe_urls = [
+            (
+                "POST",
+                f"https://api.fabric.microsoft.com/v1"
+                f"/workspaces/{workspace_id}"
+                f"/dataAgents/{fabric_client.dataagent_id}"
+                f"/aiassistant/openai",
+            ),
+            (
+                "GET",
+                f"https://api.fabric.microsoft.com/v1"
+                f"/workspaces/{workspace_id}"
+                f"/dataAgents/{fabric_client.dataagent_id}"
+                f"/aiassistant/openai/assistants",
+            ),
+        ]
         agent_reachable = False
         try:
             probe = _requests.post(
@@ -367,33 +381,45 @@ async def status() -> Dict[str, Any]:
         except Exception as probe_exc:
             logger.warning("Status query probe failed (non-fatal): %s", probe_exc)
 
-        # ── Fallback: probe the Assistants API endpoint ──────────────────────
+        # ── Fallback: probe the Assistants API endpoint(s) ───────────────────
         # This is the endpoint the application actually uses for chat queries.
+        # Try multiple paths because not every agent exposes every sub-path.
         if not agent_reachable:
-            try:
-                assistants_probe = _requests.get(
-                    assistants_url,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    params={"api-version": "2024-05-01-preview"},
-                    timeout=12,
-                )
-                if assistants_probe.status_code != 404:
-                    logger.info(
-                        "Status probe: Assistants API returned HTTP %d — agent is reachable.",
-                        assistants_probe.status_code,
-                    )
-                    agent_reachable = True
-                else:
-                    logger.warning(
-                        "Status probe: Assistants API also returned 404. workspace=%s agent=%s",
-                        workspace_id, fabric_client.dataagent_id,
-                    )
-            except Exception as asst_exc:
-                logger.warning("Assistants API probe failed (non-fatal): %s", asst_exc)
+            for method, assistants_url in assistants_probe_urls:
+                try:
+                    if method == "POST":
+                        assistants_probe = _requests.post(
+                            assistants_url,
+                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                            json={"messages": [{"role": "user", "content": "status check"}]},
+                            timeout=12,
+                        )
+                    else:
+                        assistants_probe = _requests.get(
+                            assistants_url,
+                            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                            params={"api-version": "2024-05-01-preview"},
+                            timeout=12,
+                        )
+                    if assistants_probe.status_code != 404:
+                        logger.info(
+                            "Status probe: Assistants API (%s) returned HTTP %d — agent is reachable.",
+                            method,
+                            assistants_probe.status_code,
+                        )
+                        agent_reachable = True
+                        break
+                    else:
+                        logger.debug(
+                            "Status probe: %s returned 404 — trying next variant.",
+                            method,
+                        )
+                except Exception as asst_exc:
+                    logger.warning("Assistants API probe failed (non-fatal): %s", asst_exc)
 
         if not agent_reachable:
             logger.warning(
-                "Status probe: both query and Assistants API endpoints returned 404 "
+                "Status probe: query and all Assistants API probe URLs returned 404 "
                 "— agent is NOT queryable (likely Draft state). workspace=%s agent=%s",
                 workspace_id, fabric_client.dataagent_id,
             )

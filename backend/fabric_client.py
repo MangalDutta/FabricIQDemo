@@ -85,9 +85,12 @@ class FabricClient:
         }
 
     Fallback endpoint (OpenAI-compatible, used when primary returns 404/405):
-        POST /v1/workspaces/{workspaceId}/aiskills/{agentId}/aiassistant/openai
+        POST /v1/workspaces/{workspaceId}/dataAgents/{agentId}/aiassistant/openai
         Body: {"messages": [{"role": "user", "content": "..."}]}
         Response: standard OpenAI chat-completion format
+
+    Legacy fallback (tried when the dataAgents path also returns 404):
+        POST /v1/workspaces/{workspaceId}/aiskills/{agentId}/aiassistant/openai
     """
 
     def __init__(self) -> None:
@@ -154,9 +157,18 @@ class FabricClient:
 
     def _openai_compat_url(self) -> str:
         """
-        OpenAI-compatible chat completion endpoint.
-        'aiskills' is the legacy item-type path; 'dataAgents' is the new path.
-        Try both so the client works regardless of how the agent was created.
+        OpenAI-compatible chat completion endpoint using the current
+        ``dataAgents`` item-type path (matches FabricAgentClient).
+        """
+        return (
+            f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
+            f"/dataAgents/{self.dataagent_id}/aiassistant/openai"
+        )
+
+    def _openai_compat_url_legacy(self) -> str:
+        """
+        Legacy ``aiskills`` item-type path — kept as a secondary fallback
+        for agents created before the ``dataAgents`` path was introduced.
         """
         return (
             f"{FABRIC_BASE_URL}/workspaces/{self.workspace_id}"
@@ -250,27 +262,34 @@ class FabricClient:
         self, message: str, conversation_id: Optional[str]
     ) -> Optional[requests.Response]:
         """
-        POST to the OpenAI-compatible /aiskills/.../aiassistant/openai endpoint.
-        Returns the response, or None if the endpoint is not found (404).
+        POST to the OpenAI-compatible ``/aiassistant/openai`` endpoint.
+
+        Tries the current ``dataAgents`` path first, then falls back to the
+        legacy ``aiskills`` path so agents created under either item-type
+        are reachable.
+
+        Returns the response, or None if both URLs fail.
         """
-        # Build messages: if we have a conversationId we can't reconstruct history,
-        # so just send the current question (the server holds context).
         payload: Dict[str, Any] = {
             "messages": [{"role": "user", "content": message}],
         }
-        url = self._openai_compat_url()
-        logger.debug("POST (openai-compat fallback) %s", url)
-        try:
-            resp = requests.post(
-                url,
-                headers=self._headers(),
-                json=payload,
-                timeout=120,
-            )
-            return resp
-        except Exception as exc:
-            logger.warning("OpenAI-compat fallback exception: %s", exc)
-            return None
+        for url in (self._openai_compat_url(), self._openai_compat_url_legacy()):
+            logger.debug("POST (openai-compat fallback) %s", url)
+            try:
+                resp = requests.post(
+                    url,
+                    headers=self._headers(),
+                    json=payload,
+                    timeout=120,
+                )
+                if resp.status_code != 404:
+                    return resp
+                logger.debug(
+                    "OpenAI-compat %s returned 404 — trying next variant", url,
+                )
+            except Exception as exc:
+                logger.warning("OpenAI-compat fallback exception (%s): %s", url, exc)
+        return None
 
     # ─── Extract answer from various response shapes ─────────────────────────
 
