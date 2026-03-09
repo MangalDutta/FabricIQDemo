@@ -817,9 +817,15 @@ def get_or_create_dataagent(
     lakehouse_id: str,
     token: str,
     table_name: str = "",
+    semantic_model_id: str = "",
 ) -> str:
     """
     Finds an existing Fabric Data Agent by name, or creates one if absent.
+
+    When *semantic_model_id* is provided the agent is linked to the semantic
+    model (type ``SemanticModel``) instead of the raw Lakehouse.  This is the
+    recommended approach — linking via semantic model makes the data source
+    visible in the Fabric portal "Explorer → Data" pane.
 
     KEY DESIGN DECISION — we never delete a Draft agent:
     ─────────────────────────────────────────────────────
@@ -867,18 +873,25 @@ def get_or_create_dataagent(
 
             print(f"📦 Creating Data Agent: {dataagent_name}")
             # Build data source config — include table selection when
-            # table_name is provided so the agent is fully configured
-            # on creation and no follow-up PATCH is needed (PATCH moves
-            # Published agents to Draft state).
-            data_source: Dict[str, Any] = {
-                "type": "Lakehouse",
-                "workspaceId": workspace_id,
-                "itemId": lakehouse_id,
-            }
-            if table_name:
-                data_source["selectedObjects"] = [
-                    {"schema": "dbo", "name": table_name, "objectType": "Table"}
-                ]
+            # Prefer linking via SemanticModel when available — this makes the
+            # data source visible in the Fabric portal Explorer pane.  Fall
+            # back to Lakehouse if no semantic model ID was provided.
+            if semantic_model_id:
+                data_source: Dict[str, Any] = {
+                    "type": "SemanticModel",
+                    "workspaceId": workspace_id,
+                    "itemId": semantic_model_id,
+                }
+            else:
+                data_source = {
+                    "type": "Lakehouse",
+                    "workspaceId": workspace_id,
+                    "itemId": lakehouse_id,
+                }
+                if table_name:
+                    data_source["selectedObjects"] = [
+                        {"schema": "dbo", "name": table_name, "objectType": "Table"}
+                    ]
             create_config: Dict[str, Any] = {
                 "dataSources": [data_source],
             }
@@ -1034,10 +1047,14 @@ def configure_dataagent(
     lakehouse_id: str,
     table_name: str,
     token: str,
+    semantic_model_id: str = "",
 ) -> None:
     """
-    Updates the Data Agent configuration to link the Lakehouse and select the
-    specific Delta table.
+    Updates the Data Agent configuration to link it to a data source.
+
+    When *semantic_model_id* is provided the agent is linked to the semantic
+    model (recommended — this makes the data source visible in the Fabric
+    portal Explorer pane).  Otherwise falls back to Lakehouse linkage.
 
     This is the step that makes the agent aware of *which* data it should query.
     Without this step the agent has no data source and will return empty answers.
@@ -1045,13 +1062,15 @@ def configure_dataagent(
     IMPORTANT: In Fabric preview, PATCH/PUT on a Published agent moves it back
     to Draft state.  The publish endpoint (/publish, /activate) currently returns
     HTTP 404, so there is no API way to re-publish after a PATCH.  Therefore this
-    function SKIPS the PATCH if the agent already has the Lakehouse as a data
-    source and is in Published (or unknown) state.  Only agents that are clearly
+    function SKIPS the PATCH if the agent already has the data source linked
+    and is in Published (or unknown) state.  Only agents that are clearly
     mis-configured (no data source) are patched.
 
     Tries PATCH first, then PUT to handle differences across preview versions.
     """
-    print(f"   Configuring Data Agent '{agent_name}' → Lakehouse '{lakehouse_id}' / table '{table_name}'...")
+    ds_item_id = semantic_model_id or lakehouse_id
+    ds_type = "SemanticModel" if semantic_model_id else "Lakehouse"
+    print(f"   Configuring Data Agent '{agent_name}' → {ds_type} '{ds_item_id}' ...")
 
     agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
     req_headers = {
@@ -1082,30 +1101,30 @@ def configure_dataagent(
             config = current.get("configuration") or {}
             data_sources = config.get("dataSources") or []
             already_linked = any(
-                str(ds.get("itemId", "")).lower() == lakehouse_id.lower()
+                str(ds.get("itemId", "")).lower() == ds_item_id.lower()
                 for ds in data_sources
             )
             # Check whether the API actually returned configuration data.
             # The Fabric preview GET /dataAgents/{id} often omits the
             # 'configuration' field entirely, making it impossible to tell
-            # whether the Lakehouse is already linked.
+            # whether the data source is already linked.
             has_config_data = "configuration" in current
 
             print(
                 f"   Agent current state: '{raw_state or 'unknown'}', "
                 f"data sources: {len(data_sources)}, "
-                f"lakehouse already linked: {already_linked}, "
+                f"{ds_type} already linked: {already_linked}, "
                 f"config in response: {has_config_data}"
             )
             if already_linked and not is_draft:
                 print(
-                    "   ✓ Agent is published and Lakehouse is already configured — "
+                    f"   ✓ Agent is published and {ds_type} is already configured — "
                     "skipping PATCH to avoid Draft-state regression."
                 )
                 return
             if already_linked and is_draft:
                 print(
-                    "   Agent is in Draft state with Lakehouse already linked — "
+                    f"   Agent is in Draft state with {ds_type} already linked — "
                     "will attempt to publish without re-patching."
                 )
                 # Skip to publish-only attempt below
@@ -1128,7 +1147,7 @@ def configure_dataagent(
                     return
                 print(
                     "   API did not return 'configuration' and agent is NOT queryable — "
-                    "proceeding with PATCH to link Lakehouse table."
+                    f"proceeding with PATCH to link {ds_type}."
                 )
         else:
             print(
@@ -1138,29 +1157,38 @@ def configure_dataagent(
     except Exception as exc:
         print(f"   [WARN] GET agent for state check failed (non-fatal): {exc}")
 
-    # Build data source with table selection (try progressively simpler payloads).
-    # objectType:"Table" is required by some Fabric preview API versions.
-    data_source_with_table = {
-        "type": "Lakehouse",
-        "workspaceId": workspace_id,
-        "itemId": lakehouse_id,
-        "selectedObjects": [
-            {"schema": "dbo", "name": table_name, "objectType": "Table"}
-        ],
-    }
-    data_source_basic = {
-        "type": "Lakehouse",
-        "workspaceId": workspace_id,
-        "itemId": lakehouse_id,
-    }
+    # Build data source payloads (try progressively simpler variants).
+    # When semantic_model_id is provided, use SemanticModel type; otherwise
+    # fall back to Lakehouse.
+    if semantic_model_id:
+        data_source_primary: Dict[str, Any] = {
+            "type": "SemanticModel",
+            "workspaceId": workspace_id,
+            "itemId": semantic_model_id,
+        }
+        data_source_basic = data_source_primary
+    else:
+        data_source_primary = {
+            "type": "Lakehouse",
+            "workspaceId": workspace_id,
+            "itemId": lakehouse_id,
+            "selectedObjects": [
+                {"schema": "dbo", "name": table_name, "objectType": "Table"}
+            ],
+        }
+        data_source_basic = {
+            "type": "Lakehouse",
+            "workspaceId": workspace_id,
+            "itemId": lakehouse_id,
+        }
 
     payloads = [
-        # Attempt 1: full payload with table selection + instructions
+        # Attempt 1: full payload with data source + instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": {
-                "dataSources": [data_source_with_table],
+                "dataSources": [data_source_primary],
                 "instructions": (
                     f"You are a customer analytics assistant. "
                     f"Answer questions about the '{table_name}' table in the Customer360 Lakehouse. "
@@ -1168,15 +1196,15 @@ def configure_dataagent(
                 ),
             },
         },
-        # Attempt 2: table selection without instructions
+        # Attempt 2: data source without instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": {
-                "dataSources": [data_source_with_table],
+                "dataSources": [data_source_primary],
             },
         },
-        # Attempt 3: just Lakehouse linkage, no explicit table selection
+        # Attempt 3: basic linkage, no explicit table selection
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
@@ -1236,10 +1264,10 @@ def configure_dataagent(
     print(
         f"   WARNING: Data Agent configuration failed after {attempt} attempts. "
         f"Last error: {last_err}\n"
-        "   The agent may not have the Lakehouse linked. "
-        "   You can link it manually in the Fabric portal:\n"
+        f"   The agent may not have a data source linked. "
+        f"   You can link it manually in the Fabric portal:\n"
         f"   https://app.fabric.microsoft.com/groups/{workspace_id} "
-        f"-> Open '{agent_name}' -> Add data source -> Lakehouse"
+        f"-> Open '{agent_name}' -> Add data source"
     )
 
 
@@ -1375,18 +1403,21 @@ def validate_dataagent(
     agent_name: str,
     lakehouse_id: str,
     token: str,
+    semantic_model_id: str = "",
 ) -> bool:
     """
     Post-setup validation for the Data Agent.
 
     Checks:
       1. Agent metadata is accessible (GET returns 2xx)
-      2. Agent is linked to the correct Lakehouse (if config is available)
+      2. Agent is linked to the correct data source (semantic model or Lakehouse)
       3. Agent is queryable (query endpoint is reachable)
 
     Returns True if all checks pass, False otherwise.
     Prints detailed status for each check.
     """
+    ds_item_id = semantic_model_id or lakehouse_id
+    ds_type = "SemanticModel" if semantic_model_id else "Lakehouse"
     print(f"\n   🔍 Validating Data Agent '{agent_name}' (ID: {agent_id})...")
     all_ok = True
 
@@ -1398,7 +1429,7 @@ def validate_dataagent(
         print("   ❌ Check 1/3: Agent metadata NOT accessible (GET returned non-2xx)")
         all_ok = False
 
-    # ── Check 2: Lakehouse linkage ───────────────────────────────────────────
+    # ── Check 2: Data source linkage ────────────────────────────────────────
     try:
         agent_url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}"
         resp = requests.get(
@@ -1412,24 +1443,24 @@ def validate_dataagent(
             data_sources = config.get("dataSources") or []
             if "configuration" not in current:
                 print(
-                    "   ⚠️  Check 2/3: Lakehouse linkage — API did not return "
+                    "   ⚠️  Check 2/3: Data source linkage — API did not return "
                     "'configuration' field (normal for Fabric preview, cannot verify)"
                 )
             elif any(
-                str(ds.get("itemId", "")).lower() == lakehouse_id.lower()
+                str(ds.get("itemId", "")).lower() == ds_item_id.lower()
                 for ds in data_sources
             ):
-                print("   ✅ Check 2/3: Agent is linked to the correct Lakehouse")
+                print(f"   ✅ Check 2/3: Agent is linked to the correct {ds_type}")
             else:
                 print(
-                    f"   ❌ Check 2/3: Agent is NOT linked to Lakehouse '{lakehouse_id}'. "
+                    f"   ❌ Check 2/3: Agent is NOT linked to {ds_type} '{ds_item_id}'. "
                     f"Found data sources: {[ds.get('itemId') for ds in data_sources]}"
                 )
                 all_ok = False
         else:
             print(f"   ⚠️  Check 2/3: Could not fetch agent details (HTTP {resp.status_code})")
     except Exception as exc:
-        print(f"   ⚠️  Check 2/3: Lakehouse linkage check failed: {exc}")
+        print(f"   ⚠️  Check 2/3: Data source linkage check failed: {exc}")
 
     # ── Check 3: Agent is queryable ──────────────────────────────────────────
     queryable = _is_agent_queryable(workspace_id, agent_id, token)
@@ -2352,43 +2383,12 @@ def main(argv=None) -> None:
                 fabric_token,
             )
 
-        # ── 5 / 6. Data Agent ─────────────────────────────────────────────
+        # ── 5 / 6. Semantic Model (default from Lakehouse) ─────────────────
+        # Moved BEFORE Data Agent so the agent can link to the semantic model
+        # (linking via SemanticModel makes the data source visible in the
+        # Fabric portal "Explorer → Data" pane).
         step_label = "Step 5" if args.skip_data_upload else "Step 6"
-        print(f"\n🤖 {step_label}: Fabric Data Agent")
-        dataagent_id = get_or_create_dataagent(
-            workspace_id, args.dataagent_name, lakehouse_id, fabric_token,
-            table_name=args.table_name,
-        )
-
-        # ── 5a / 6a. Configure Data Agent (link Lakehouse + table) ────────
-        print(f"\n🔗 {step_label}a: Configure Data Agent – link Lakehouse table")
-        # Re-acquire token before the configure call (previous steps may have
-        # taken long enough for the token to be near expiry).
-        fabric_token = get_fabric_token()
-        configure_dataagent(
-            workspace_id,
-            dataagent_id,
-            args.dataagent_name,
-            lakehouse_id,
-            args.table_name,
-            fabric_token,
-        )
-
-        # ── 5b / 6b. Publish Data Agent ───────────────────────────────────
-        print(f"\n📢 {step_label}b: Publish Data Agent")
-        publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
-
-        # ── 5c / 6c. Validate Data Agent ──────────────────────────────────
-        print(f"\n✅ {step_label}c: Validate Data Agent")
-        fabric_token = get_fabric_token()
-        validate_dataagent(
-            workspace_id, dataagent_id, args.dataagent_name,
-            lakehouse_id, fabric_token,
-        )
-
-        # ── 6 / 7. Semantic Model (default from Lakehouse) ────────────────
-        next_step = 6 if args.skip_data_upload else 7
-        print(f"\n📐 Step {next_step}: Semantic Model")
+        print(f"\n📐 {step_label}: Semantic Model")
         # Re-acquire token in case it expired during data upload
         fabric_token = get_fabric_token()
 
@@ -2417,6 +2417,43 @@ def main(argv=None) -> None:
         semantic_model_id = get_default_semantic_model(
             workspace_id, args.lakehouse_name, lakehouse_id, fabric_token,
             table_name=args.table_name,
+        )
+
+        # ── 6 / 7. Data Agent ─────────────────────────────────────────────
+        next_step = 6 if args.skip_data_upload else 7
+        print(f"\n🤖 Step {next_step}: Fabric Data Agent")
+        dataagent_id = get_or_create_dataagent(
+            workspace_id, args.dataagent_name, lakehouse_id, fabric_token,
+            table_name=args.table_name,
+            semantic_model_id=semantic_model_id or "",
+        )
+
+        # ── 6a / 7a. Configure Data Agent (link semantic model) ───────────
+        print(f"\n🔗 Step {next_step}a: Configure Data Agent – link data source")
+        # Re-acquire token before the configure call (previous steps may have
+        # taken long enough for the token to be near expiry).
+        fabric_token = get_fabric_token()
+        configure_dataagent(
+            workspace_id,
+            dataagent_id,
+            args.dataagent_name,
+            lakehouse_id,
+            args.table_name,
+            fabric_token,
+            semantic_model_id=semantic_model_id or "",
+        )
+
+        # ── 6b / 7b. Publish Data Agent ───────────────────────────────────
+        print(f"\n📢 Step {next_step}b: Publish Data Agent")
+        publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
+
+        # ── 6c / 7c. Validate Data Agent ──────────────────────────────────
+        print(f"\n✅ Step {next_step}c: Validate Data Agent")
+        fabric_token = get_fabric_token()
+        validate_dataagent(
+            workspace_id, dataagent_id, args.dataagent_name,
+            lakehouse_id, fabric_token,
+            semantic_model_id=semantic_model_id or "",
         )
 
         # ── 7 / 8. Power BI Report ────────────────────────────────────────
