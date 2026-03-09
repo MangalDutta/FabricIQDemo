@@ -327,15 +327,29 @@ async def status() -> Dict[str, Any]:
                 ],
             }
 
-        # ── Step 2: Probe the query endpoint to verify real queryability ──────
+        # ── Step 2: Probe endpoints to verify real queryability ────────────────
         # The metadata API often returns 200 with no state field whether the agent
-        # is Published OR Draft.  The only reliable check is whether the query
-        # endpoint itself returns non-404.  We send a minimal probe message.
+        # is Published OR Draft.  We probe the actual endpoints to know for sure.
+        #
+        # The application uses two APIs to interact with the agent:
+        #   1. REST /query endpoint (legacy / simple query)
+        #   2. OpenAI Assistants API at /aiassistant/openai (threads, runs, etc.)
+        #
+        # The /query endpoint may return 404 even when the Assistants API works
+        # perfectly (e.g. for agents that only expose the Assistants interface).
+        # We probe both and consider the agent ready if EITHER is reachable.
         query_url = (
             f"https://api.fabric.microsoft.com/v1"
             f"/workspaces/{workspace_id}"
             f"/dataAgents/{fabric_client.dataagent_id}/query"
         )
+        assistants_url = (
+            f"https://api.fabric.microsoft.com/v1"
+            f"/workspaces/{workspace_id}"
+            f"/dataAgents/{fabric_client.dataagent_id}"
+            f"/aiassistant/openai/assistants"
+        )
+        agent_reachable = False
         try:
             probe = _requests.post(
                 query_url,
@@ -343,34 +357,61 @@ async def status() -> Dict[str, Any]:
                 json={"userMessage": "status check"},
                 timeout=12,
             )
-            if probe.status_code == 404:
-                logger.warning(
-                    "Status probe: query endpoint returned 404 — agent is NOT queryable "
-                    "(likely Draft state). workspace=%s agent=%s",
-                    workspace_id, fabric_client.dataagent_id,
+            if probe.status_code != 404:
+                # Any non-404 response (200, 400, 500) means the endpoint exists
+                logger.info(
+                    "Status probe: query endpoint returned HTTP %d — agent is reachable.",
+                    probe.status_code,
                 )
-                return {
-                    "ready": False,
-                    "message": (
-                        f"The AI Agent '{agent_name}' is not queryable yet "
-                        "(query endpoint returned 404, typically meaning the agent is in Draft state). "
-                        "Please publish the agent in the Fabric portal."
-                    ),
-                    "agent_name": agent_name,
-                    "troubleshooting": [
-                        f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
-                        "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
-                        "Visit the /api/debug endpoint on the backend for full diagnostics.",
-                    ],
-                }
-            # Any non-404 response (200, 400, 500) means the endpoint is reachable
-            logger.info(
-                "Status probe: query endpoint returned HTTP %d — agent is reachable.",
-                probe.status_code,
-            )
+                agent_reachable = True
         except Exception as probe_exc:
-            # Probe timed out or failed — don't block status; log and continue
             logger.warning("Status query probe failed (non-fatal): %s", probe_exc)
+
+        # ── Fallback: probe the Assistants API endpoint ──────────────────────
+        # This is the endpoint the application actually uses for chat queries.
+        if not agent_reachable:
+            try:
+                assistants_probe = _requests.get(
+                    assistants_url,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    params={"api-version": "2024-05-01-preview"},
+                    timeout=12,
+                )
+                if assistants_probe.status_code != 404:
+                    logger.info(
+                        "Status probe: Assistants API returned HTTP %d — agent is reachable.",
+                        assistants_probe.status_code,
+                    )
+                    agent_reachable = True
+                else:
+                    logger.warning(
+                        "Status probe: Assistants API also returned 404. workspace=%s agent=%s",
+                        workspace_id, fabric_client.dataagent_id,
+                    )
+            except Exception as asst_exc:
+                logger.warning("Assistants API probe failed (non-fatal): %s", asst_exc)
+
+        if not agent_reachable:
+            logger.warning(
+                "Status probe: both query and Assistants API endpoints returned 404 "
+                "— agent is NOT queryable (likely Draft state). workspace=%s agent=%s",
+                workspace_id, fabric_client.dataagent_id,
+            )
+            return {
+                "ready": False,
+                "message": (
+                    f"The AI Agent '{agent_name}' is not queryable yet "
+                    "(both query and Assistants API endpoints returned 404, "
+                    "typically meaning the agent is in Draft state). "
+                    "Please publish the agent in the Fabric portal."
+                ),
+                "agent_name": agent_name,
+                "troubleshooting": [
+                    f"Open the Fabric portal and publish the agent: https://app.fabric.microsoft.com/groups/{workspace_id}",
+                    "Ensure the App Service Managed Identity is a workspace Contributor (Fabric portal → Workspace → Manage access → Add as Contributor).",
+                    "Visit the /api/debug endpoint on the backend for full diagnostics.",
+                ],
+            }
 
         return {
             "ready": True,

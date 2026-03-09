@@ -260,6 +260,94 @@ class TestStatusEndpoint:
                     assert data["ready"] is False
                     assert len(data["troubleshooting"]) > 0
 
+    def test_status_ready_when_query_404_but_assistants_api_works(self):
+        """When /query returns 404 but Assistants API is reachable, status is ready."""
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        # Metadata GET returns 200 with no explicit state (common for Published agents)
+        mock_metadata_resp = MagicMock()
+        mock_metadata_resp.ok = True
+        mock_metadata_resp.json.return_value = {}
+
+        # /query POST returns 404
+        mock_query_resp = MagicMock()
+        mock_query_resp.status_code = 404
+
+        # Assistants API GET returns 200 (agent is reachable via Assistants API)
+        mock_assistants_resp = MagicMock()
+        mock_assistants_resp.status_code = 200
+
+        def mock_get(url, **kwargs):
+            if "/aiassistant/openai/assistants" in url:
+                return mock_assistants_resp
+            return mock_metadata_resp
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", side_effect=mock_get):
+                    with patch("app._requests.post", return_value=mock_query_resp):
+                        client = TestClient(app_module.app)
+                        resp = client.get("/api/status")
+                        assert resp.status_code == 200
+                        data = resp.json()
+                        assert data["ready"] is True
+                        assert len(data["troubleshooting"]) == 0
+
+    def test_status_not_ready_when_both_query_and_assistants_return_404(self):
+        """When both /query and Assistants API return 404, status is not ready."""
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        # Metadata GET returns 200 with no explicit state
+        mock_metadata_resp = MagicMock()
+        mock_metadata_resp.ok = True
+        mock_metadata_resp.json.return_value = {}
+
+        # Both probes return 404
+        mock_404_resp = MagicMock()
+        mock_404_resp.status_code = 404
+
+        def mock_get(url, **kwargs):
+            if "/aiassistant/openai/assistants" in url:
+                return mock_404_resp
+            return mock_metadata_resp
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", side_effect=mock_get):
+                    with patch("app._requests.post", return_value=mock_404_resp):
+                        client = TestClient(app_module.app)
+                        resp = client.get("/api/status")
+                        assert resp.status_code == 200
+                        data = resp.json()
+                        assert data["ready"] is False
+                        assert len(data["troubleshooting"]) > 0
+
 
 # ─── Chat endpoint – happy path ───────────────────────────────────────────────
 
