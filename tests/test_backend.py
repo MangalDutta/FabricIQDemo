@@ -704,6 +704,114 @@ class TestFabricClientChat:
 
         assert mock_primary.call_count == 3
 
+    def test_openai_compat_url_uses_dataagents_path(self):
+        """_openai_compat_url must use the /dataAgents/ path (not /aiskills/)."""
+        client = self._make_client()
+        url = client._openai_compat_url()
+        assert "/dataAgents/" in url
+        assert "/aiskills/" not in url
+        assert url.endswith("/aiassistant/openai")
+
+    def test_openai_compat_url_legacy_uses_aiskills_path(self):
+        """_openai_compat_url_legacy must use the /aiskills/ path."""
+        client = self._make_client()
+        url = client._openai_compat_url_legacy()
+        assert "/aiskills/" in url
+        assert url.endswith("/aiassistant/openai")
+
+    def test_fallback_tries_dataagents_before_aiskills(self):
+        """OpenAI-compat fallback should try /dataAgents/ first, then /aiskills/."""
+        client = self._make_client()
+        called_urls = []
+
+        def fake_post(url, **kwargs):
+            called_urls.append(url)
+            mock_resp = MagicMock()
+            if "/dataAgents/" in url and "/aiassistant/openai" in url:
+                mock_resp.ok = True
+                mock_resp.status_code = 200
+                mock_resp.json.return_value = {"choices": [{"message": {"content": "fallback ok"}}]}
+            else:
+                mock_resp.ok = False
+                mock_resp.status_code = 404
+            return mock_resp
+
+        with patch("requests.post", side_effect=fake_post):
+            result = client._call_openai_compat("test", None)
+        assert result is not None
+        assert result.ok
+        # Should have hit the dataAgents URL first
+        assert any("/dataAgents/" in u and "/aiassistant/openai" in u for u in called_urls)
+
+    def test_fallback_falls_through_to_aiskills_on_404(self):
+        """When /dataAgents/ returns 404, fallback should try /aiskills/."""
+        client = self._make_client()
+        called_urls = []
+
+        def fake_post(url, **kwargs):
+            called_urls.append(url)
+            mock_resp = MagicMock()
+            if "/aiskills/" in url:
+                mock_resp.ok = True
+                mock_resp.status_code = 200
+                mock_resp.json.return_value = {"choices": [{"message": {"content": "legacy ok"}}]}
+            else:
+                mock_resp.ok = False
+                mock_resp.status_code = 404
+            return mock_resp
+
+        with patch("requests.post", side_effect=fake_post):
+            result = client._call_openai_compat("test", None)
+        assert result is not None
+        assert result.ok
+        # Both URLs should have been tried
+        assert len(called_urls) == 2
+        assert any("/dataAgents/" in u for u in called_urls)
+        assert any("/aiskills/" in u for u in called_urls)
+
+    def test_chat_succeeds_via_openai_compat_when_query_returns_404(self):
+        """When /query returns 404 but OpenAI-compat works, chat should succeed."""
+        client = self._make_client()
+        call_count = {"primary": 0}
+
+        def fake_post(url, **kwargs):
+            mock_resp = MagicMock()
+            if "/query" in url:
+                call_count["primary"] += 1
+                mock_resp.ok = False
+                mock_resp.status_code = 404
+                mock_resp.text = "not found"
+                mock_resp.json.return_value = {"errorCode": "EntityNotFound"}
+                return mock_resp
+            elif "/aiassistant/openai" in url:
+                mock_resp.ok = True
+                mock_resp.status_code = 200
+                mock_resp.json.return_value = {
+                    "choices": [{"message": {"content": "Fallback answer"}}]
+                }
+                return mock_resp
+            mock_resp.ok = False
+            mock_resp.status_code = 500
+            mock_resp.text = "unexpected"
+            return mock_resp
+
+        def fake_get(url, **kwargs):
+            mock_resp = MagicMock()
+            # Pre-flight returns state=unknown (agent looks OK in metadata)
+            mock_resp.ok = True
+            mock_resp.json.return_value = {}
+            return mock_resp
+
+        with (
+            patch("requests.post", side_effect=fake_post),
+            patch("requests.get", side_effect=fake_get),
+            patch("fabric_client.time.sleep", return_value=None),
+        ):
+            result = client.chat("u-fb", "Count customers by Segment")
+
+        assert result["answer"] == "Fallback answer"
+        assert result["metadata"]["endpoint"] == "openai-compat"
+
 
 # ─── AgentNotReadyError tests ─────────────────────────────────────────────────
 
