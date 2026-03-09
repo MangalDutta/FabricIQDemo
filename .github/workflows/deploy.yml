@@ -485,44 +485,7 @@ jobs:
             echo "✓ Agent is in '$AGENT_STATE' state — should be queryable."
           fi
 
-          # Probe the query endpoint directly — the metadata endpoint can
-          # return 200 while the query endpoint returns 404 if the agent
-          # is not in a fully published/queryable state.
-          echo ""
-          echo "Probing query endpoint..."
-          QUERY_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer $FABRIC_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"userMessage":"test connectivity"}' \
-            "https://api.fabric.microsoft.com/v1/workspaces/$WORKSPACE_ID/dataAgents/$DATAAGENT_ID/query" 2>/dev/null || echo "000")
-
-          echo "Query endpoint returned HTTP $QUERY_STATUS"
-          if [ "$QUERY_STATUS" = "404" ]; then
-            echo ""
-            echo "╔══════════════════════════════════════════════════════════════════╗"
-            echo "║  ⚠️  ACTION REQUIRED — Agent query endpoint returned 404        ║"
-            echo "╠══════════════════════════════════════════════════════════════════╣"
-            echo "║  The agent exists but is NOT queryable (Draft/unpublished).     ║"
-            echo "║  The automated publish API is not yet available on this tenant. ║"
-            echo "║                                                                  ║"
-            echo "║  MANUAL STEPS (takes ~1 minute):                                ║"
-            echo "║  1. Open the Fabric portal workspace:                            ║"
-            echo "║     https://app.fabric.microsoft.com/groups/$WORKSPACE_ID       ║"
-            echo "║  2. Click on 'Customer360Agent' in the item list                 ║"
-            echo "║  3. Click 'Publish' in the top ribbon                            ║"
-            echo "║  4. Wait for the green 'Published' badge to appear               ║"
-            echo "║                                                                  ║"
-            echo "║  After publishing, the frontend chat will work immediately.      ║"
-            echo "╚══════════════════════════════════════════════════════════════════╝"
-            echo ""
-            echo "Agent ID (for reference): $DATAAGENT_ID"
-            echo "Workspace URL: https://app.fabric.microsoft.com/groups/$WORKSPACE_ID"
-          elif [ "$QUERY_STATUS" = "000" ]; then
-            echo "⚠️  Could not reach the query endpoint (network error)."
-          else
-            echo "✓ Query endpoint is reachable (HTTP $QUERY_STATUS) — agent is ready."
-          fi
+          echo "✓ Agent state verified. Queryability is managed by fabric_setup.py."
 
       # --- Smoke Test (optional - runs against deployed apps) ---
       - name: Post-Deployment Smoke Test

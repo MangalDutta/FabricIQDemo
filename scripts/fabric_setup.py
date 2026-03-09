@@ -1109,61 +1109,18 @@ def configure_dataagent(
                 _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
                 return
 
-            # When the API didn't return configuration data we cannot determine
-            # linkage status.  In Fabric preview, GET /dataAgents/{id} NEVER
-            # returns the 'configuration' field — so has_config_data is always
-            # False for existing agents.  We therefore NEVER PATCH an existing
-            # agent based on missing config data, because:
-            #   1. The agent was likely already manually configured + published
-            #   2. PATCH always reverts a Published agent back to Draft state
-            #   3. The publish API returns 404 on this tenant — no way to
-            #      re-publish programmatically after a PATCH
-            #
-            # Instead: probe the query endpoint and act accordingly.
-            #   - Non-404 response → already functional, skip.
-            #   - 404 response     → agent is in Draft; try to publish only
-            #                        (no PATCH — Lakehouse is already linked).
+            # In Fabric preview, GET /dataAgents/{id} NEVER returns the
+            # 'configuration' field — so has_config_data is always False for
+            # existing agents.  Skip PATCH entirely: the agent is already
+            # configured by the user, and PATCH would revert it to Draft.
+            # ensure_agent_published (called in publish_dataagent) will do
+            # the single authoritative queryability check.
             if not has_config_data:
                 print(
                     "   API did not return 'configuration' (normal for Fabric preview) — "
-                    "probing query endpoint to determine current state..."
+                    "skipping PATCH. Publish step will verify queryability."
                 )
-                try:
-                    probe_url = (
-                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
-                        f"/dataAgents/{agent_id}/query"
-                    )
-                    probe_resp = requests.post(
-                        probe_url,
-                        headers=req_headers,
-                        json={"userMessage": "test connectivity"},
-                        timeout=30,
-                    )
-                    if probe_resp.status_code != 404:
-                        print(
-                            f"   ✓ Query endpoint responded HTTP {probe_resp.status_code} — "
-                            "agent is functional. Skipping PATCH to preserve "
-                            "published state."
-                        )
-                        return
-                    # Query endpoint → 404: agent is in Draft state but the
-                    # Lakehouse is already linked (user configured it manually).
-                    # Do NOT PATCH — that would break the config again.
-                    # Just try to publish; if the publish API is unavailable,
-                    # the ensure_agent_published call in publish_dataagent will
-                    # surface the manual-publish instructions.
-                    print(
-                        "   Query endpoint → 404 (agent in Draft state). "
-                        "Skipping PATCH — Lakehouse assumed already linked. "
-                        "Will attempt publish-only in the publish step."
-                    )
-                    return
-                except Exception as probe_exc:
-                    print(
-                        f"   Query probe failed ({probe_exc}) — "
-                        "skipping PATCH to avoid regressing published state."
-                    )
-                    return
+                return
         else:
             print(
                 f"   [WARN] GET agent returned HTTP {get_resp.status_code} — "
