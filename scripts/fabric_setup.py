@@ -1110,13 +1110,23 @@ def configure_dataagent(
                 return
 
             # When the API didn't return configuration data we cannot determine
-            # linkage status.  Rather than blindly PATCHing (which moves a
-            # Published agent to Draft with no API way to re-publish), probe
-            # the query endpoint to check if the agent is already functional.
-            if not has_config_data and not is_draft:
+            # linkage status.  In Fabric preview, GET /dataAgents/{id} NEVER
+            # returns the 'configuration' field — so has_config_data is always
+            # False for existing agents.  We therefore NEVER PATCH an existing
+            # agent based on missing config data, because:
+            #   1. The agent was likely already manually configured + published
+            #   2. PATCH always reverts a Published agent back to Draft state
+            #   3. The publish API returns 404 on this tenant — no way to
+            #      re-publish programmatically after a PATCH
+            #
+            # Instead: probe the query endpoint and act accordingly.
+            #   - Non-404 response → already functional, skip.
+            #   - 404 response     → agent is in Draft; try to publish only
+            #                        (no PATCH — Lakehouse is already linked).
+            if not has_config_data:
                 print(
-                    "   API did not return 'configuration' — probing query "
-                    "endpoint to check if agent is already functional..."
+                    "   API did not return 'configuration' (normal for Fabric preview) — "
+                    "probing query endpoint to determine current state..."
                 )
                 try:
                     probe_url = (
@@ -1136,20 +1146,24 @@ def configure_dataagent(
                             "published state."
                         )
                         return
+                    # Query endpoint → 404: agent is in Draft state but the
+                    # Lakehouse is already linked (user configured it manually).
+                    # Do NOT PATCH — that would break the config again.
+                    # Just try to publish; if the publish API is unavailable,
+                    # the ensure_agent_published call in publish_dataagent will
+                    # surface the manual-publish instructions.
                     print(
-                        f"   Query endpoint returned 404 — agent may need "
-                        "configuration. Proceeding with PATCH."
+                        "   Query endpoint → 404 (agent in Draft state). "
+                        "Skipping PATCH — Lakehouse assumed already linked. "
+                        "Will attempt publish-only in the publish step."
                     )
+                    return
                 except Exception as probe_exc:
                     print(
                         f"   Query probe failed ({probe_exc}) — "
-                        "proceeding with PATCH as a precaution."
+                        "skipping PATCH to avoid regressing published state."
                     )
-
-            print(
-                f"   Lakehouse not yet linked (or agent mis-configured) — "
-                f"will PATCH configuration."
-            )
+                    return
         else:
             print(
                 f"   [WARN] GET agent returned HTTP {get_resp.status_code} — "
