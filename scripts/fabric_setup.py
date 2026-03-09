@@ -1437,7 +1437,7 @@ def validate_dataagent(
         print("   ✅ Check 3/3: Agent is queryable (query endpoint reachable)")
     else:
         print(
-            "   ⚠️  Check 3/3: Agent is NOT yet queryable (query endpoint → 404). "
+            "   ⚠️  Check 3/3: Agent is NOT yet queryable (query endpoint not reachable). "
             "Manual publish may be required."
         )
         # Not a hard failure — user may need to publish manually
