@@ -654,9 +654,7 @@ const App: React.FC = () => {
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              agentNotReady
-                ? 'AI Agent is not ready — see banner above for details'
-                : chatMode === 'compare'
+              chatMode === 'compare'
                 ? 'Enter a question to send to both draft and production agents…'
                 : chatMode === 'detailed'
                 ? 'Ask with detailed run info (SQL queries, data previews)…'
