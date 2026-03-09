@@ -107,7 +107,10 @@ const App: React.FC = () => {
     setPbi(prev => ({ ...prev, loading: true, error: '' }));
     try {
       const resp = await axios.get(`${BACKEND_URL}/api/powerbi-token`, { timeout: 20_000 });
-      const { embed_token, embed_url, report_id } = resp.data;
+      // Response shape mirrors the MS PowerBI-Developer-Samples EmbedConfig model:
+      // { tokenId, accessToken, tokenExpiry, reportConfig: [{ reportId, reportName, embedUrl }] }
+      const { accessToken, reportConfig } = resp.data;
+      const report = reportConfig?.[0];
 
       setPbi({
         loading: false,
@@ -115,9 +118,9 @@ const App: React.FC = () => {
         fallbackUrl: '',
         config: {
           type: 'report',
-          id: report_id,
-          embedUrl: embed_url,
-          accessToken: embed_token,
+          id: report?.reportId,
+          embedUrl: report?.embedUrl,
+          accessToken: accessToken,
           tokenType: models.TokenType.Embed,
           settings: {
             panes: {
