@@ -391,6 +391,7 @@ class TestMain:
              patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
              patch("fabric_setup.configure_dataagent"), \
              patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
@@ -416,6 +417,7 @@ class TestMain:
              patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
              patch("fabric_setup.configure_dataagent"), \
              patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
@@ -494,6 +496,100 @@ class TestConfigureDataagent:
             mock_poll.return_value = {"status": "Succeeded"}
             fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "T", "tok")
         mock_poll.assert_called_once_with("op-cfg-1", "tok", "data agent configuration")
+
+    def test_skips_patch_when_no_config_but_queryable(self):
+        """When GET returns no 'configuration' but agent IS queryable, skip PATCH."""
+        get_resp = _ok_response({"id": "ag1", "displayName": "Agent"}, 200)
+        with patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=True), \
+             patch("requests.request") as mock_req:
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+        # PATCH/PUT should NOT have been called
+        mock_req.assert_not_called()
+
+    def test_proceeds_with_patch_when_no_config_and_not_queryable(self):
+        """When GET returns no 'configuration' and agent is NOT queryable, do PATCH."""
+        get_resp = _ok_response({"id": "ag1", "displayName": "Agent"}, 200)
+        ok_resp = _ok_response({}, 200)
+        with patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=False), \
+             patch("requests.request", return_value=ok_resp) as mock_req, \
+             patch("fabric_setup.ensure_agent_published"):
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+        # PATCH should have been called to link the Lakehouse
+        assert mock_req.call_count >= 1
+        first_call = mock_req.call_args_list[0]
+        assert first_call[0][0] == "PATCH"
+        body = first_call[1].get("json", {})
+        ds = body.get("configuration", {}).get("dataSources", [{}])[0]
+        assert ds.get("itemId") == "lh1"
+
+    def test_skips_patch_when_already_linked_and_published(self):
+        """When agent is already linked to the correct Lakehouse and published, skip PATCH."""
+        get_resp = _ok_response({
+            "id": "ag1",
+            "displayName": "Agent",
+            "state": "Active",
+            "configuration": {
+                "dataSources": [
+                    {"type": "Lakehouse", "workspaceId": "ws1", "itemId": "lh1"}
+                ]
+            },
+        }, 200)
+        with patch("requests.get", return_value=get_resp), \
+             patch("requests.request") as mock_req:
+            fs.configure_dataagent("ws1", "ag1", "Agent", "lh1", "Customer360", "tok")
+        # PATCH should NOT have been called
+        mock_req.assert_not_called()
+
+
+class TestValidateDataagent:
+    def test_returns_true_when_all_checks_pass(self):
+        """validate_dataagent returns True when agent exists, is linked, and queryable."""
+        get_resp = _ok_response({
+            "id": "ag1",
+            "configuration": {
+                "dataSources": [{"itemId": "lh1"}]
+            },
+        }, 200)
+        with patch("fabric_setup._validate_agent", return_value=True), \
+             patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=True):
+            result = fs.validate_dataagent("ws1", "ag1", "Agent", "lh1", "tok")
+        assert result is True
+
+    def test_returns_false_when_agent_not_accessible(self):
+        """validate_dataagent returns False when agent GET fails."""
+        get_resp = _error_response(404, "not found")
+        with patch("fabric_setup._validate_agent", return_value=False), \
+             patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=False):
+            result = fs.validate_dataagent("ws1", "ag1", "Agent", "lh1", "tok")
+        assert result is False
+
+    def test_warns_when_no_config_in_response(self):
+        """validate_dataagent reports warning when GET omits 'configuration'."""
+        get_resp = _ok_response({"id": "ag1"}, 200)
+        with patch("fabric_setup._validate_agent", return_value=True), \
+             patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=True):
+            result = fs.validate_dataagent("ws1", "ag1", "Agent", "lh1", "tok")
+        # Should still return True (agent exists and is queryable)
+        assert result is True
+
+    def test_returns_false_when_wrong_lakehouse(self):
+        """validate_dataagent returns False when linked to wrong Lakehouse."""
+        get_resp = _ok_response({
+            "id": "ag1",
+            "configuration": {
+                "dataSources": [{"itemId": "wrong-lh"}]
+            },
+        }, 200)
+        with patch("fabric_setup._validate_agent", return_value=True), \
+             patch("requests.get", return_value=get_resp), \
+             patch("fabric_setup._is_agent_queryable", return_value=True):
+            result = fs.validate_dataagent("ws1", "ag1", "Agent", "lh1", "tok")
+        assert result is False
 
 
 # ─── trigger_default_semantic_model ──────────────────────────────────────────
