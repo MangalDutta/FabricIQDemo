@@ -677,25 +677,40 @@ def load_table_from_file(
 
 def _validate_agent(workspace_id: str, agent_id: str, token: str) -> bool:
     """
-    Returns True only if the agent is reachable AND queryable (query endpoint
-    returns non-404).
+    Returns True if the agent metadata is accessible (GET /dataAgents/{id}
+    returns HTTP 2xx).
 
-    A Draft agent returns HTTP 200 on the metadata GET but 404 on the /query
-    endpoint. Checking only GET would treat Draft agents as valid, causing
-    every re-deploy to reuse a stale Draft agent instead of deleting/recreating
-    it.  Probing /query gives ground truth.
+    This is an *existence* check only — a Draft agent passes this check.
+    Use _is_agent_queryable() to verify the agent can actually answer queries.
+    We intentionally separate these two concerns so we never delete a Draft
+    agent: a Draft agent keeps the same ID in the App Service config and
+    becomes functional as soon as the user publishes it in the Fabric portal.
+    Deleting + recreating a Draft agent just creates a new Draft agent with
+    a different ID (breaking the App Service config) and gains nothing.
     """
     try:
-        # Step 1: metadata GET must succeed
-        get_resp = requests.get(
+        resp = requests.get(
             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
             headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
-        if not get_resp.ok:
-            return False
+        return resp.ok
+    except Exception:
+        return False
 
-        # Step 2: probe the query endpoint — Draft agents return 404 here
+
+def _is_agent_queryable(workspace_id: str, agent_id: str, token: str) -> bool:
+    """
+    Returns True if the agent's /query endpoint returns a non-404 response.
+
+    The Fabric metadata GET returns HTTP 200 regardless of whether the agent
+    is Published or Draft.  Probing /query is the only reliable way to tell
+    whether the agent can actually answer natural-language questions.
+
+    Any status other than 404 (including 200, 400, 500) means the endpoint
+    is reachable and the agent is queryable.
+    """
+    try:
         probe = requests.post(
             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}/query",
             headers={
@@ -703,18 +718,71 @@ def _validate_agent(workspace_id: str, agent_id: str, token: str) -> bool:
                 "Content-Type": "application/json",
             },
             json={"userMessage": "ping"},
-            timeout=15,
+            timeout=20,
         )
-        if probe.status_code == 404:
-            print(
-                f"   ⚠️  Agent {agent_id} metadata OK but query endpoint returned 404 "
-                f"— agent is in Draft/unpublished state (not queryable)."
-            )
-            return False
-        # Any non-404 response (200, 400, 500) means the query endpoint is reachable
-        return True
+        return probe.status_code != 404
     except Exception:
+        # Network error / timeout — assume not queryable
         return False
+
+
+def ensure_agent_published(
+    workspace_id: str,
+    agent_id: str,
+    agent_name: str,
+    token: str,
+) -> bool:
+    """
+    Check queryability and publish if needed.  Returns True if the agent is
+    (or becomes) queryable, False if manual action is still required.
+
+    Call this AFTER every create or configure step instead of _try_publish_dataagent
+    so that:
+      - Already-published agents are detected immediately (no extra API calls)
+      - Draft agents get a full set of publish attempts
+      - If all publish attempts fail, the user gets a clear, actionable message
+        with the workspace URL rather than a cryptic 404 in the smoke test
+    """
+    # Fast path: already queryable — nothing to do
+    if _is_agent_queryable(workspace_id, agent_id, token):
+        print(f"   ✓ Agent '{agent_name}' is already queryable — skipping publish step.")
+        return True
+
+    print(f"   Agent '{agent_name}' is not yet queryable (query endpoint → 404).")
+    print(f"   Attempting to publish via all known API methods...")
+    if _try_publish_dataagent(workspace_id, agent_id, agent_name, token):
+        # Verify queryability after publish
+        time.sleep(5)
+        if _is_agent_queryable(workspace_id, agent_id, token):
+            print(f"   ✓ Agent '{agent_name}' is now queryable after publish.")
+            return True
+        print(f"   ⚠️  Publish API returned success but agent still not queryable — "
+              f"may still be activating.  Will retry in 15s...")
+        time.sleep(15)
+        if _is_agent_queryable(workspace_id, agent_id, token):
+            print(f"   ✓ Agent '{agent_name}' became queryable after short delay.")
+            return True
+
+    # All publish attempts failed or agent still not queryable after publish
+    print(
+        f"\n"
+        f"   ╔══════════════════════════════════════════════════════════════════╗\n"
+        f"   ║  ⚠️  MANUAL PUBLISH REQUIRED                                    ║\n"
+        f"   ╠══════════════════════════════════════════════════════════════════╣\n"
+        f"   ║  The Fabric publish API is not yet available on this tenant.    ║\n"
+        f"   ║  Do this ONE-TIME manual step (takes ~1 min):                   ║\n"
+        f"   ║                                                                  ║\n"
+        f"   ║  1. Open: https://app.fabric.microsoft.com/groups/{workspace_id[:8]}...  ║\n"
+        f"   ║     Full URL: https://app.fabric.microsoft.com/groups/{workspace_id}\n"
+        f"   ║  2. Click '{agent_name}'                                         ║\n"
+        f"   ║  3. Click 'Publish' in the top ribbon                            ║\n"
+        f"   ║  4. Look for the green 'Published' badge                         ║\n"
+        f"   ║                                                                  ║\n"
+        f"   ║  After publishing ONCE, all future re-deploys will keep it       ║\n"
+        f"   ║  published — you will NEVER need to do this again.               ║\n"
+        f"   ╚══════════════════════════════════════════════════════════════════╝\n"
+    )
+    return False
 
 
 def _delete_agent(workspace_id: str, agent_id: str, token: str) -> None:
@@ -751,12 +819,21 @@ def get_or_create_dataagent(
     table_name: str = "",
 ) -> str:
     """
-    Creates (or finds) a Fabric Data Agent in the workspace and links it to the
-    specified Lakehouse so it can answer natural-language queries.
+    Finds an existing Fabric Data Agent by name, or creates one if absent.
 
-    The Fabric Data Agent REST API (`/v1/workspaces/{id}/dataAgents`) is in preview
-    as of 2026-03.  If the endpoint returns 404 the function falls back to the
-    generic Items API and logs a manual-configuration reminder.
+    KEY DESIGN DECISION — we never delete a Draft agent:
+    ─────────────────────────────────────────────────────
+    A Draft agent has the same ID as it would have after being published.
+    Deleting it and recreating just produces a NEW Draft agent with a
+    different ID — which breaks the App Service FABRIC_DATAAGENT_ID setting
+    and gains nothing.  Instead we:
+
+      1. Find by name → return its ID (Draft or Published)
+      2. Caller (`configure_dataagent` + `ensure_agent_published`) handles
+         Lakehouse linking and publish attempts
+      3. If all publish attempts fail, the user publishes once manually;
+         from that point on, all future re-deploys find a Published agent
+         and touch nothing (no PATCH, no publish call)
 
     Returns the Data Agent item ID.
     """
@@ -774,15 +851,19 @@ def get_or_create_dataagent(
                 if agent.get("displayName") == dataagent_name:
                     agent_id = agent["id"]
                     if _validate_agent(workspace_id, agent_id, token):
+                        # Agent exists — return its ID regardless of Draft/Published state.
+                        # configure_dataagent + ensure_agent_published (called by the
+                        # main flow) will handle Lakehouse linking and publishing.
                         print(f"✓ Found existing Data Agent: {dataagent_name} (ID: {agent_id})")
                         return agent_id
-                    # Agent is listed but not queryable — delete and recreate
+                    # GET itself failed — agent record is truly broken (e.g. workspace
+                    # was deleted and recreated with a different ID space).  Safe to delete.
                     print(
-                        f"⚠️  Agent '{dataagent_name}' (ID: {agent_id}) exists but is not "
-                        f"queryable — deleting and recreating..."
+                        f"⚠️  Agent '{dataagent_name}' (ID: {agent_id}) is listed but "
+                        f"GET returned non-2xx — record appears corrupt, deleting..."
                     )
                     _delete_agent(workspace_id, agent_id, token)
-                    break  # Exit search loop; fall through to creation below
+                    break  # Fall through to creation below
 
             print(f"📦 Creating Data Agent: {dataagent_name}")
             # Build data source config — include table selection when
@@ -835,11 +916,11 @@ def get_or_create_dataagent(
                 agent_id = create_resp.json().get("id")
                 if agent_id:
                     print(f"✓ Created Data Agent: {dataagent_name} (ID: {agent_id})")
-                    # Newly created agents are in Draft state.  Wait briefly for
-                    # Fabric to finish internal provisioning before publishing.
-                    print("   Waiting 15s for agent to finish provisioning...")
-                    time.sleep(15)
-                    _try_publish_dataagent(workspace_id, agent_id, dataagent_name, token)
+                    # Newly created agents start in Draft state.  Wait for Fabric
+                    # to finish internal provisioning before attempting publish.
+                    print("   Waiting 20s for Fabric to finish provisioning the agent...")
+                    time.sleep(20)
+                    ensure_agent_published(workspace_id, agent_id, dataagent_name, token)
                     return agent_id
             elif create_resp.status_code == 202:
                 op_id = create_resp.headers.get("x-ms-operation-id")
@@ -855,9 +936,9 @@ def get_or_create_dataagent(
                     if agent.get("displayName") == dataagent_name:
                         agent_id = agent["id"]
                         print(f"✓ Data Agent ready: {dataagent_name} (ID: {agent_id})")
-                        print("   Waiting 15s for agent to finish provisioning...")
-                        time.sleep(15)
-                        _try_publish_dataagent(workspace_id, agent_id, dataagent_name, token)
+                        print("   Waiting 20s for Fabric to finish provisioning the agent...")
+                        time.sleep(20)
+                        ensure_agent_published(workspace_id, agent_id, dataagent_name, token)
                         return agent_id
     except Exception as exc:  # noqa: BLE001
         print(f"⚠️  Dedicated dataAgents endpoint failed: {exc}")
@@ -1145,9 +1226,10 @@ def configure_dataagent(
                 )
                 if resp.status_code in (200, 201, 204):
                     print(f"   OK  Data Agent configured successfully (HTTP {resp.status_code}).")
-                    # After a successful PATCH/PUT the agent may be in Draft state.
-                    # Attempt to publish immediately so the /query endpoint is reachable.
-                    _try_publish_dataagent(workspace_id, agent_id, agent_name, token)
+                    # After a successful PATCH/PUT the agent is in Draft state.
+                    # Use ensure_agent_published so we get the fast-path check
+                    # and clear manual instructions if the publish API is unavailable.
+                    ensure_agent_published(workspace_id, agent_id, agent_name, token)
                     return
                 if resp.status_code == 202:
                     # Long-running — poll if we have an operation ID
@@ -1290,145 +1372,21 @@ def publish_dataagent(
     token: str,
 ) -> None:
     """
-    Publishes / activates the Data Agent so it is ready to serve NL queries.
+    Ensures the Data Agent is published and queryable.
 
-    Tries several endpoint patterns used across Fabric API preview versions:
-      1. POST /v1/workspaces/{id}/dataAgents/{id}/publish
-      2. POST /v1/workspaces/{id}/dataAgents/{id}/activate
-      3. POST /v1/workspaces/{id}/items/{id}/publish  (generic item publish)
+    Delegates entirely to ensure_agent_published which:
+      - Fast-paths if the agent is already queryable (no extra API calls)
+      - Tries all known publish endpoints if needed
+      - Prints clear manual instructions with the workspace URL if the
+        Fabric publish API is unavailable on this tenant
 
-    After attempting to publish, verifies the agent state via GET and warns
-    clearly if the agent is still in Draft state (manual publish required).
+    This is called from the main flow after configure_dataagent.
+    configure_dataagent itself already calls ensure_agent_published after
+    a successful PATCH, so this call handles the case where PATCH was
+    skipped (agent already correctly configured and published).
     """
-    print(f"   Publishing Data Agent '{agent_name}'...")
-
-    endpoints = [
-        f"/workspaces/{workspace_id}/dataAgents/{agent_id}/publish",
-        f"/workspaces/{workspace_id}/dataAgents/{agent_id}/activate",
-        f"/workspaces/{workspace_id}/items/{agent_id}/publish",
-    ]
-
-    published_via_api = False
-    for endpoint in endpoints:
-        try:
-            resp = requests.post(
-                f"{FABRIC_BASE_URL}{endpoint}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={},
-                timeout=60,
-            )
-            if resp.status_code in (200, 201, 204):
-                print(f"   OK  Data Agent published via {endpoint} (HTTP {resp.status_code}).")
-                published_via_api = True
-                break
-            if resp.status_code == 202:
-                op_id = resp.headers.get("x-ms-operation-id") or resp.headers.get("x-ms-operationid")
-                if op_id:
-                    poll_operation(op_id, token, "data agent publish")
-                print(f"   OK  Data Agent publish accepted via {endpoint} (202).")
-                published_via_api = True
-                break
-            if resp.status_code == 404:
-                # Endpoint doesn't exist in this API version — try next
-                continue
-            print(f"   [{endpoint}] returned HTTP {resp.status_code}: {resp.text[:200]}")
-        except Exception as exc:
-            print(f"   [{endpoint}] exception (non-fatal): {exc}")
-
-    if not published_via_api:
-        print(
-            "   INFO: No dedicated publish endpoint responded successfully.\n"
-            "   The Data Agent may already be active (this is normal for agents\n"
-            "   created via the /dataAgents endpoint — they publish on creation)."
-        )
-
-    # ── Post-publish verification ─────────────────────────────────────────
-    # Check the agent state to confirm it is queryable.  If it is still in
-    # Draft state, print a prominent warning with manual instructions.
-    try:
-        check_resp = requests.get(
-            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/dataAgents/{agent_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=30,
-        )
-        if check_resp.ok:
-            agent_data = check_resp.json()
-            raw_state = (
-                agent_data.get("state")
-                or agent_data.get("status")
-                or agent_data.get("publishState")
-                or "unknown"
-            )
-            state_lower = str(raw_state).lower()
-            if state_lower in ("draft", "unpublished", "inactive"):
-                print(
-                    "\n"
-                    "   ╔══════════════════════════════════════════════════════════╗\n"
-                    "   ║  ⚠️  ACTION REQUIRED: Agent is still in DRAFT state!    ║\n"
-                    "   ╠══════════════════════════════════════════════════════════╣\n"
-                    "   ║  The automated publish did not succeed. Queries will    ║\n"
-                    "   ║  return HTTP 404 until the agent is published.          ║\n"
-                    "   ║                                                          ║\n"
-                    "   ║  To fix:                                                 ║\n"
-                    "   ║  1. Open the Fabric portal:                              ║\n"
-                    f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}\n"
-                    f"   ║  2. Open the agent '{agent_name}'                       ║\n"
-                    "   ║  3. Click 'Publish' in the top ribbon                   ║\n"
-                    "   ╚══════════════════════════════════════════════════════════╝\n"
-                )
-            else:
-                # State is 'unknown' or appears published.  Probe the query
-                # endpoint for a definitive check (the Fabric GET API often
-                # omits the state field entirely).
-                print(f"   Agent state from metadata: '{raw_state}'")
-                try:
-                    probe_url = (
-                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
-                        f"/dataAgents/{agent_id}/query"
-                    )
-                    probe_headers = {
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    }
-                    probe_resp = requests.post(
-                        probe_url,
-                        headers=probe_headers,
-                        json={"userMessage": "test"},
-                        timeout=30,
-                    )
-                    if probe_resp.status_code == 404:
-                        print(
-                            "\n"
-                            "   ╔══════════════════════════════════════════════════════════╗\n"
-                            "   ║  ⚠️  Agent query endpoint returned 404!                 ║\n"
-                            "   ╠══════════════════════════════════════════════════════════╣\n"
-                            "   ║  The agent metadata is accessible but the query         ║\n"
-                            "   ║  endpoint is not — the agent may need to be published.  ║\n"
-                            "   ║                                                          ║\n"
-                            "   ║  To fix:                                                 ║\n"
-                            "   ║  1. Open the Fabric portal:                              ║\n"
-                            f"   ║     https://app.fabric.microsoft.com/groups/{workspace_id}  ║\n"
-                            f"   ║  2. Open the agent '{agent_name}'                            ║\n"
-                            "   ║  3. Click 'Publish' in the top ribbon                   ║\n"
-                            "   ╚══════════════════════════════════════════════════════════╝\n"
-                        )
-                    else:
-                        print(
-                            f"   ✓ Query endpoint responded HTTP {probe_resp.status_code} "
-                            "— agent is queryable."
-                        )
-                except Exception as probe_exc:
-                    print(f"   [WARN] Query probe failed (non-fatal): {probe_exc}")
-        else:
-            print(
-                f"   [WARN] Post-publish GET returned HTTP {check_resp.status_code} — "
-                "could not verify agent state."
-            )
-    except Exception as exc:
-        print(f"   [WARN] Post-publish verification failed (non-fatal): {exc}")
+    print(f"   Verifying Data Agent '{agent_name}' is published and queryable...")
+    ensure_agent_published(workspace_id, agent_id, agent_name, token)
 
 
 # ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
