@@ -12,7 +12,6 @@ Choose the deployment option that fits your scenario:
 | Button | What it deploys | Requirements |
 |---|---|---|
 | [![🚀 Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — Azure infra + Fabric workspace + Docker images + App Service configuration (~10 min) | GitHub OIDC configured (see Prerequisites) |
-| [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | 
 
 > **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
 
@@ -390,6 +389,7 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Backend `/health` returns `{"status":"healthy"}`
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] (Optional) Power BI report embedded in right panel
+
 
 
 
