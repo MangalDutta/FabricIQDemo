@@ -2398,6 +2398,150 @@ def create_ontology(
 
 # ─── Fabric Data Agent (simplified) ──────────────────────────────────────────
 
+# ─── Notebook Deployment ─────────────────────────────────────────────────────
+
+def upload_notebooks_to_workspace(
+    workspace_id: str,
+    notebooks_dir: str,
+    token: str,
+) -> List[str]:
+    """Uploads all .ipynb files from *notebooks_dir* into the Fabric workspace.
+
+    Each notebook is created (or updated) as a Fabric ``Notebook`` item via the
+    Items REST API.  The .ipynb content is base64-encoded and sent as a single
+    definition part.
+
+    Returns a list of created/updated notebook item IDs.
+    """
+    print(f"📓 Uploading notebooks from {notebooks_dir}")
+
+    if not os.path.isdir(notebooks_dir):
+        print(f"   ⚠️  Notebooks directory not found: {notebooks_dir} — skipping")
+        return []
+
+    notebook_files = sorted(
+        f for f in os.listdir(notebooks_dir) if f.endswith(".ipynb")
+    )
+    if not notebook_files:
+        print("   ⚠️  No .ipynb files found — skipping")
+        return []
+
+    # List existing notebook items in the workspace for idempotency.
+    existing_notebooks: Dict[str, str] = {}
+    try:
+        resp = fabric_request(
+            "GET", f"/workspaces/{workspace_id}/items?type=Notebook", token
+        )
+        for item in resp.json().get("value", []):
+            existing_notebooks[item["displayName"]] = item["id"]
+    except Exception as exc:
+        print(f"   [WARN] Could not list existing notebooks: {exc}")
+
+    created_ids: List[str] = []
+
+    for filename in notebook_files:
+        filepath = os.path.join(notebooks_dir, filename)
+        display_name = filename.replace(".ipynb", "")
+
+        with open(filepath, "rb") as fh:
+            content_b64 = base64.b64encode(fh.read()).decode()
+
+        definition = {
+            "parts": [
+                {
+                    "path": "notebook-content.ipynb",
+                    "payload": content_b64,
+                    "payloadType": "InlineBase64",
+                }
+            ]
+        }
+
+        # Update if already exists, otherwise create.
+        if display_name in existing_notebooks:
+            item_id = existing_notebooks[display_name]
+            print(f"   ↻ Updating notebook: {display_name} (ID: {item_id})")
+            try:
+                resp = fabric_request(
+                    "POST",
+                    f"/workspaces/{workspace_id}/items/{item_id}/updateDefinition",
+                    token,
+                    json={"definition": definition},
+                )
+                created_ids.append(item_id)
+            except Exception as exc:
+                print(f"   ⚠️  Failed to update {display_name}: {exc}")
+        else:
+            print(f"   + Creating notebook: {display_name}")
+            payload = {
+                "displayName": display_name,
+                "type": "Notebook",
+                "definition": definition,
+            }
+
+            for attempt in range(1, NAME_RETRY_MAX + 1):
+                try:
+                    resp = requests.post(
+                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=60,
+                    )
+
+                    if _is_name_not_available_yet(resp):
+                        print(
+                            f"   [{attempt}/{NAME_RETRY_MAX}] Name not available yet — "
+                            f"waiting {NAME_RETRY_WAIT}s..."
+                        )
+                        time.sleep(NAME_RETRY_WAIT)
+                        continue
+
+                    if resp.status_code in (200, 201):
+                        item_id = resp.json()["id"]
+                        created_ids.append(item_id)
+                        print(f"     ✓ Created: {item_id}")
+                        break
+
+                    if resp.status_code == 202:
+                        op_id = (
+                            resp.headers.get("x-ms-operation-id")
+                            or resp.json().get("operationId")
+                        )
+                        if op_id:
+                            poll_operation(op_id, token, f"notebook '{display_name}'")
+                        # Fetch the item ID after async creation.
+                        list_resp = fabric_request(
+                            "GET",
+                            f"/workspaces/{workspace_id}/items?type=Notebook",
+                            token,
+                        )
+                        for item in list_resp.json().get("value", []):
+                            if item["displayName"] == display_name:
+                                created_ids.append(item["id"])
+                                print(f"     ✓ Created (async): {item['id']}")
+                                break
+                        break
+
+                    if resp.status_code == 409:
+                        print(f"   ⚠️  Notebook '{display_name}' already exists (409) — skipping")
+                        break
+
+                    print(
+                        f"   ⚠️  Notebook '{display_name}' creation failed "
+                        f"[{resp.status_code}]: {resp.text[:200]}"
+                    )
+                    break
+
+                except Exception as exc:
+                    print(f"   ⚠️  Exception creating '{display_name}': {exc}")
+                    break
+
+    print(f"   ✓ {len(created_ids)} notebook(s) deployed to workspace")
+    return created_ids
+
+
 def create_data_agent(workspace_id: str, semantic_model_id: str, token: str) -> str:
     """Creates a Fabric Data Agent linked to the given semantic model."""
     print("🤖 Step: Creating Data Agent")
@@ -2823,6 +2967,15 @@ def main(argv=None) -> None:
             ontology_id=ontology_id or "",
         )
 
+        # ── Step 10: Deploy Notebooks ─────────────────────────────────────
+        print("\n📓 Step 10: Deploy Notebooks to Workspace")
+        fabric_token = get_fabric_token()
+        notebooks_dir = os.path.join(os.path.dirname(__file__), "..", "notebooks")
+        notebooks_dir = os.path.abspath(notebooks_dir)
+        notebook_ids = upload_notebooks_to_workspace(
+            workspace_id, notebooks_dir, fabric_token,
+        )
+
         workspace_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
 
         # ── Summary ───────────────────────────────────────────────────────
@@ -2838,6 +2991,7 @@ def main(argv=None) -> None:
             "ontology_id":        ontology_id or "",
             "workspace_url":      workspace_url,
             "capacity_id":        args.capacity_id,
+            "notebooks_deployed": len(notebook_ids),
         }
         print(json.dumps(result, indent=2))
 
