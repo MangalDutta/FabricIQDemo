@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import base64
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -343,17 +344,18 @@ async def status() -> Dict[str, Any]:
             f"/workspaces/{workspace_id}"
             f"/dataAgents/{fabric_client.dataagent_id}/query"
         )
-        # Probe URLs for the Assistants API.  The /assistants path (list
-        # assistants) can return 404 even on working agents, so we also try
-        # the OpenAI-compat chat-completion path (POST with messages), which
-        # matches the endpoint used by the actual chat fallback.
+        # Probe URLs for the Assistants API.  The primary probe is a POST to
+        # /assistants with the required api-version parameter — this mirrors
+        # the exact call FabricAgentClient makes when creating an assistant
+        # (client.beta.assistants.create).  A GET to the same path is kept
+        # as a secondary fallback for future API changes.
         assistants_probe_urls = [
             (
                 "POST",
                 f"https://api.fabric.microsoft.com/v1"
                 f"/workspaces/{workspace_id}"
                 f"/dataAgents/{fabric_client.dataagent_id}"
-                f"/aiassistant/openai",
+                f"/aiassistant/openai/assistants",
             ),
             (
                 "GET",
@@ -391,7 +393,8 @@ async def status() -> Dict[str, Any]:
                         assistants_probe = _requests.post(
                             assistants_url,
                             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                            json={"messages": [{"role": "user", "content": "status check"}]},
+                            json={"model": "not-used"},
+                            params={"api-version": "2024-05-01-preview"},
                             timeout=12,
                         )
                     else:
@@ -715,6 +718,27 @@ async def chat(request: Request) -> Dict[str, Any]:
     except HTTPException:
         raise
     except AgentNotReadyError as ex:
+        # The /query endpoint returned 404. Try Assistants API (FabricAgentClient) as fallback.
+        # This handles agents that only expose the OpenAI Assistants API interface.
+        if agent_client:
+            logger.info(
+                "fabric_client.chat raised AgentNotReadyError — trying Assistants API fallback. user=%s",
+                user_id,
+            )
+            try:
+                answer = agent_client.ask(question=message, timeout=120)
+                return {
+                    "answer": answer,
+                    "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                    "metadata": {
+                        "workspace_id": fabric_client.workspace_id,
+                        "dataagent_id": fabric_client.dataagent_id,
+                        "source": "fabric_data_agent",
+                        "endpoint": "assistants-api-fallback",
+                    },
+                }
+            except Exception as ask_ex:
+                logger.error("Assistants API fallback also failed: %s", ask_ex)
         logger.warning(f"Agent not ready: {ex}")
         raise HTTPException(
             status_code=503,

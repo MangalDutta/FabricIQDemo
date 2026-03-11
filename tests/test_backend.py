@@ -348,8 +348,57 @@ class TestStatusEndpoint:
                         assert data["ready"] is False
                         assert len(data["troubleshooting"]) > 0
 
+    def test_status_ready_when_assistants_post_with_api_version_works(self):
+        """When POST to /assistants?api-version returns non-404, status is ready.
 
-# ─── Chat endpoint – happy path ───────────────────────────────────────────────
+        This is the real-world scenario where the agent only supports the
+        OpenAI Assistants API (not the legacy /query endpoint). The FabricAgentClient
+        calls POST /aiassistant/openai/assistants?api-version=2024-05-01-preview which
+        must be probed by the status check.
+        """
+        mock_fc = _make_mock_fabric_client()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.dataagent_name = "TestAgent"
+        mock_fc._get_token.return_value = "fake-token"
+
+        # Metadata GET returns 200 with no explicit state
+        mock_metadata_resp = MagicMock()
+        mock_metadata_resp.ok = True
+        mock_metadata_resp.json.return_value = {}
+
+        # /query POST returns 404, but POST to /assistants returns 200
+        mock_query_resp = MagicMock()
+        mock_query_resp.status_code = 404
+        mock_assistants_post_resp = MagicMock()
+        mock_assistants_post_resp.status_code = 200
+
+        def mock_post(url, **kwargs):
+            if "/aiassistant/openai/assistants" in url:
+                return mock_assistants_post_resp  # 200 - matches FabricAgentClient behavior
+            return mock_query_resp  # 404 for /query
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-test-guid",
+                "FABRIC_DATAAGENT_ID": "agent-test-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", return_value=mock_fc):
+                import app as app_module
+                importlib.reload(app_module)
+                app_module.fabric_client = mock_fc
+                with patch("app._requests.get", return_value=mock_metadata_resp):
+                    with patch("app._requests.post", side_effect=mock_post):
+                        client = TestClient(app_module.app)
+                        resp = client.get("/api/status")
+                        assert resp.status_code == 200
+                        data = resp.json()
+                        assert data["ready"] is True
+                        assert len(data["troubleshooting"]) == 0
+
+
 
 class TestChatEndpointHappyPath:
     def test_chat_returns_200(self, test_client_with_fabric):
@@ -451,8 +500,88 @@ class TestChatEndpointErrorPaths:
         resp = client.post("/api/chat", json={"message": "test"})
         assert resp.status_code == 500
 
+    def test_chat_falls_back_to_assistants_api_when_query_not_found(self):
+        """When fabric_client.chat raises AgentNotReadyError, /api/chat falls back to agent_client.ask()."""
+        from fabric_client import AgentNotReadyError
 
-# ─── Reset endpoint tests ─────────────────────────────────────────────────────
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_fc = MagicMock()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.chat.side_effect = AgentNotReadyError(
+            "Agent in Draft state",
+            workspace_id="ws-test-guid",
+            agent_id="agent-test-guid",
+        )
+
+        mock_ac = MagicMock()
+        mock_ac.ask.return_value = "Fallback answer from Assistants API"
+
+        app_module.fabric_client = mock_fc
+        app_module.agent_client = mock_ac
+
+        client = TestClient(app_module.app)
+        resp = client.post("/api/chat", json={"message": "Top customers"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["answer"] == "Fallback answer from Assistants API"
+        assert data["metadata"]["endpoint"] == "assistants-api-fallback"
+
+    def test_chat_503_when_fallback_also_fails(self):
+        """When both fabric_client.chat and agent_client.ask fail, returns 503."""
+        from fabric_client import AgentNotReadyError
+
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_fc = MagicMock()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.chat.side_effect = AgentNotReadyError(
+            "Agent not ready",
+            workspace_id="ws-test-guid",
+            agent_id="agent-test-guid",
+        )
+
+        mock_ac = MagicMock()
+        mock_ac.ask.side_effect = RuntimeError("Assistants API also unavailable")
+
+        app_module.fabric_client = mock_fc
+        app_module.agent_client = mock_ac
+
+        client = TestClient(app_module.app)
+        resp = client.post("/api/chat", json={"message": "Top customers"})
+        assert resp.status_code == 503
+        detail = resp.json().get("detail", {})
+        assert detail.get("error") == "agent_not_ready"
+
+    def test_chat_503_when_agent_not_ready_and_no_fallback_client(self):
+        """When AgentNotReadyError is raised and agent_client is None, returns 503."""
+        from fabric_client import AgentNotReadyError
+
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_fc = MagicMock()
+        mock_fc.workspace_id = "ws-test-guid"
+        mock_fc.dataagent_id = "agent-test-guid"
+        mock_fc.chat.side_effect = AgentNotReadyError(
+            "Agent not ready",
+            workspace_id="ws-test-guid",
+            agent_id="agent-test-guid",
+        )
+
+        app_module.fabric_client = mock_fc
+        app_module.agent_client = None
+
+        client = TestClient(app_module.app)
+        resp = client.post("/api/chat", json={"message": "Top customers"})
+        assert resp.status_code == 503
+        detail = resp.json().get("detail", {})
+        assert detail.get("error") == "agent_not_ready"
+
 
 class TestResetEndpoint:
     def test_reset_returns_200(self, test_client_with_fabric):
