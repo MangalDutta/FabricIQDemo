@@ -141,6 +141,181 @@ class TestConfigEndpoint:
                 assert resp.status_code == 200
                 assert resp.json()["powerbi_report_url"] == "https://app.powerbi.com/test-report"
 
+
+# ─── PowerBI token endpoint tests ────────────────────────────────────────────
+
+class TestPowerBITokenEndpoint:
+    """Tests for the /api/powerbi-token endpoint and generate_embed_token helper."""
+
+    def _make_client_with_pbi_cred(self, report_id: str = "rpt-guid", group_id: str = "ws-guid"):
+        """Return a TestClient with ManagedIdentityCredential mocked for Power BI."""
+        mock_token = MagicMock()
+        mock_token.token = "fake-aad-token"
+
+        mock_cred = MagicMock()
+        mock_cred.get_token.return_value = mock_token
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake-guid",
+                "FABRIC_DATAAGENT_ID": "agent-fake-guid",
+                "POWERBI_REPORT_ID": report_id,
+                "POWERBI_GROUP_ID": group_id,
+            },
+        ):
+            with patch("fabric_client.FabricClient", side_effect=Exception("no fabric")):
+                with patch("azure.identity.ManagedIdentityCredential", return_value=mock_cred):
+                    import app as app_module
+                    importlib.reload(app_module)
+                    return TestClient(app_module.app), app_module
+
+    def test_powerbi_token_503_when_not_configured(self):
+        """When POWERBI_REPORT_ID and POWERBI_GROUP_ID are missing, returns 503."""
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake",
+                "FABRIC_DATAAGENT_ID": "agent-fake",
+                "POWERBI_REPORT_ID": "",
+                "POWERBI_GROUP_ID": "",
+                "POWERBI_REPORT_URL": "",
+            },
+        ):
+            with patch("fabric_client.FabricClient", side_effect=Exception("no fabric")):
+                import app as app_module
+                importlib.reload(app_module)
+                client = TestClient(app_module.app)
+                resp = client.get("/api/powerbi-token")
+                assert resp.status_code == 503
+                assert "not configured" in resp.json()["detail"].lower()
+
+    def test_powerbi_token_uses_managed_identity_credential(self):
+        """Verifies that ManagedIdentityCredential is used (not DefaultAzureCredential)."""
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake",
+                "FABRIC_DATAAGENT_ID": "agent-fake",
+                "POWERBI_REPORT_ID": "rpt-guid",
+                "POWERBI_GROUP_ID": "ws-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", side_effect=Exception("no fabric")):
+                with patch("azure.identity.ManagedIdentityCredential") as mock_mic_cls:
+                    import app as app_module
+                    importlib.reload(app_module)
+                    mock_mic_cls.assert_called_once()
+
+    def test_generate_embed_token_calls_correct_url(self):
+        """generate_embed_token must POST to the correct GenerateToken URL."""
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "token": "embed-token-xyz",
+            "tokenId": "tid-123",
+            "expiration": "2099-01-01T00:00:00Z",
+        }
+
+        with patch("app._requests.post", return_value=mock_resp) as mock_post:
+            result = app_module.generate_embed_token(
+                "aad-token", "ds-id", "rpt-id", "ws-id"
+            )
+
+        call_args = mock_post.call_args
+        assert call_args.args[0] == "https://api.powerbi.com/v1.0/myorg/GenerateToken"
+        payload = call_args.kwargs.get("json", {})
+        assert payload["datasets"] == [{"id": "ds-id"}]
+        assert payload["reports"] == [{"id": "rpt-id"}]
+        assert payload["targetWorkspaces"] == [{"id": "ws-id"}]
+        assert result["token"] == "embed-token-xyz"
+
+    def test_generate_embed_token_sets_auth_header(self):
+        """generate_embed_token must pass Bearer token in Authorization header."""
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"token": "tok", "tokenId": "tid", "expiration": "exp"}
+
+        with patch("app._requests.post", return_value=mock_resp) as mock_post:
+            app_module.generate_embed_token("my-aad-token", "ds", "rpt", "ws")
+
+        headers = mock_post.call_args.kwargs.get("headers", {})
+        assert headers.get("Authorization") == "Bearer my-aad-token"
+        assert headers.get("Content-Type") == "application/json"
+
+    def test_generate_embed_token_raises_on_non_200(self):
+        """generate_embed_token must raise Exception when API returns non-200."""
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+        import app as app_module
+        importlib.reload(app_module)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 403
+        mock_resp.text = "Forbidden: service principal not authorized"
+
+        with patch("app._requests.post", return_value=mock_resp):
+            with pytest.raises(Exception, match="403"):
+                app_module.generate_embed_token("tok", "ds", "rpt", "ws")
+
+    def test_powerbi_token_endpoint_happy_path(self):
+        """End-to-end: /api/powerbi-token returns EmbedConfig when all calls succeed."""
+        mock_token = MagicMock()
+        mock_token.token = "aad-token"
+        mock_cred = MagicMock()
+        mock_cred.get_token.return_value = mock_token
+
+        mock_report_resp = MagicMock()
+        mock_report_resp.status_code = 200
+        mock_report_resp.json.return_value = {
+            "embedUrl": "https://app.powerbi.com/reportEmbed?reportId=rpt-guid",
+            "name": "Customer360",
+            "datasetId": "ds-guid",
+        }
+        mock_report_resp.raise_for_status = MagicMock()
+
+        mock_token_resp = MagicMock()
+        mock_token_resp.status_code = 200
+        mock_token_resp.json.return_value = {
+            "token": "embed-token",
+            "tokenId": "tid-abc",
+            "expiration": "2099-01-01T00:00:00Z",
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "FABRIC_WORKSPACE_ID": "ws-fake",
+                "FABRIC_DATAAGENT_ID": "agent-fake",
+                "POWERBI_REPORT_ID": "rpt-guid",
+                "POWERBI_GROUP_ID": "ws-guid",
+            },
+        ):
+            with patch("fabric_client.FabricClient", side_effect=Exception("no fabric")):
+                with patch("azure.identity.ManagedIdentityCredential", return_value=mock_cred):
+                    import app as app_module
+                    importlib.reload(app_module)
+                    client = TestClient(app_module.app)
+                    with patch("app._requests.get", return_value=mock_report_resp):
+                        with patch("app._requests.post", return_value=mock_token_resp):
+                            resp = client.get("/api/powerbi-token")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["accessToken"] == "embed-token"
+        assert data["tokenId"] == "tid-abc"
+        assert data["tokenExpiry"] == "2099-01-01T00:00:00Z"
+        assert len(data["reportConfig"]) == 1
+        assert data["reportConfig"][0]["reportId"] == "rpt-guid"
+        assert data["reportConfig"][0]["embedUrl"].startswith("https://")
+
 
 # ─── Status endpoint tests ────────────────────────────────────────────────────
 

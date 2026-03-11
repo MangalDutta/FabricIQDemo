@@ -9,7 +9,7 @@ from urllib.parse import urlparse, parse_qs
 from typing import Any, Dict
 
 import requests as _requests
-from azure.identity import DefaultAzureCredential
+from azure.identity import ManagedIdentityCredential
 
 from fabric_client import AgentNotReadyError, FabricClient
 from fabric_agent_client import FabricAgentClient
@@ -49,12 +49,50 @@ except Exception as ex:
     logger.warning(f"FabricAgentClient init failed (non-fatal): {ex}")
     agent_client = None
 
-# Shared credential for Power BI token endpoint (reuses the same Managed Identity)
+# Shared credential for Power BI token endpoint (uses Managed Identity)
 try:
-    _pbi_credential = DefaultAzureCredential()
+    _pbi_credential = ManagedIdentityCredential()
 except Exception as ex:
-    logger.warning(f"DefaultAzureCredential init for Power BI failed: {ex}")
+    logger.warning(f"ManagedIdentityCredential init for Power BI failed: {ex}")
     _pbi_credential = None
+
+
+def generate_embed_token(
+    access_token: str, dataset_id: str, report_id: str, workspace_id: str
+) -> dict:
+    """Call the Power BI multi-resource GenerateToken endpoint.
+
+    See: https://aka.ms/MultiResourceEmbedToken
+
+    Args:
+        access_token: AAD bearer token with Power BI API scope.
+        dataset_id: The Power BI dataset ID.
+        report_id: The Power BI report ID.
+        workspace_id: The Power BI workspace (group) ID.
+
+    Returns:
+        The JSON response from the GenerateToken API containing
+        ``token``, ``tokenId``, and ``expiration``.
+
+    Raises:
+        Exception: If the GenerateToken API returns a non-200 response.
+    """
+    url = "https://api.powerbi.com/v1.0/myorg/GenerateToken"
+    payload = {
+        "datasets": [{"id": dataset_id}],
+        "reports": [{"id": report_id}],
+        "targetWorkspaces": [{"id": workspace_id}],
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    response = _requests.post(url, json=payload, headers=headers, timeout=15)
+    if response.status_code != 200:
+        raise Exception(
+            f"Power BI GenerateToken failed with status {response.status_code}: {response.text}"
+        )
+    return response.json()
 
 @app.get("/")
 async def root() -> Dict[str, str]:
@@ -189,38 +227,19 @@ async def get_powerbi_token() -> Dict[str, Any]:
 
     # ── Step 3: POST GenerateToken — multi-resource endpoint (MS recommended) ──
     # Mirrors: pbiembedservice.get_embed_token_for_single_report_single_workspace()
-    # See: https://aka.ms/MultiResourceEmbedToken
-    generate_token_request = {
-        "datasets": [{"id": dataset_id}],
-        "reports": [{"id": report_id}],
-        "targetWorkspaces": [{"id": group_id}],
-    }
     try:
-        token_resp = _requests.post(
-            "https://api.powerbi.com/v1.0/myorg/GenerateToken",
-            headers=request_headers,
-            json=generate_token_request,
-            timeout=15,
-        )
-        token_resp.raise_for_status()
-        token_data = token_resp.json()
-    except _requests.exceptions.HTTPError as ex:
-        http_status = ex.response.status_code if ex.response else 503
-        body = ex.response.text[:300] if ex.response else str(ex)
-        logger.error("GenerateToken HTTP %s: %s", http_status, body)
-        hints = {
-            401: " Ensure the Managed Identity is added to the Power BI workspace as Contributor.",
-            403: " Enable 'Allow service principals to use Power BI APIs' in Power BI Admin Portal → Tenant Settings.",
-        }
-        raise HTTPException(
-            status_code=503,
-            detail=f"Power BI embed token generation failed (HTTP {http_status}).{hints.get(http_status, '')}",
-        )
+        token_data = generate_embed_token(aad_token, dataset_id, report_id, group_id)
     except Exception as ex:
-        logger.error("GenerateToken request failed: %s", ex)
+        error_msg = str(ex)
+        logger.error("GenerateToken request failed: %s", error_msg)
+        hint = ""
+        if "401" in error_msg:
+            hint = " Ensure the Managed Identity is added to the Power BI workspace as Contributor."
+        elif "403" in error_msg:
+            hint = " Enable 'Allow service principals to use Power BI APIs' in Power BI Admin Portal → Tenant Settings."
         raise HTTPException(
             status_code=503,
-            detail=f"Failed to call Power BI GenerateToken API: {str(ex)[:250]}",
+            detail=f"Failed to call Power BI GenerateToken API: {error_msg[:250]}{hint}",
         )
 
     # ── Return EmbedConfig matching the MS sample model ───────────────────────
