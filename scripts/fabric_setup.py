@@ -831,6 +831,7 @@ def get_or_create_dataagent(
     token: str,
     table_name: str = "",
     semantic_model_id: str = "",
+    ontology_id: str = "",
 ) -> str:
     """
     Finds an existing Fabric Data Agent by name, or creates one if absent.
@@ -839,6 +840,11 @@ def get_or_create_dataagent(
     model (type ``SemanticModel``) instead of the raw Lakehouse.  This is the
     recommended approach — linking via semantic model makes the data source
     visible in the Fabric portal "Explorer → Data" pane.
+
+    When *ontology_id* is provided the ontology is attached to the agent at
+    creation time via the ``ontologies`` field in ``create_config``.  This is
+    the correct place to attach the ontology — Fabric's internal provisioning
+    order is: Create Ontology → Create Agent (with ontology) → Publish.
 
     KEY DESIGN DECISION — we never delete a Draft agent:
     ─────────────────────────────────────────────────────
@@ -908,6 +914,8 @@ def get_or_create_dataagent(
             create_config: Dict[str, Any] = {
                 "dataSources": [data_source],
             }
+            if ontology_id:
+                create_config["ontologies"] = [{"id": ontology_id}]
             if table_name:
                 create_config["instructions"] = (
                     f"You are a customer analytics assistant. "
@@ -1070,8 +1078,12 @@ def configure_dataagent(
     model (recommended — this makes the data source visible in the Fabric
     portal Explorer pane).  Otherwise falls back to Lakehouse linkage.
 
-    When *ontology_id* is provided the agent is also linked to the Fabric IQ
-    Ontology, which improves natural-language query accuracy.
+    NOTE: Ontology attachment is handled at agent *creation* time via
+    ``get_or_create_dataagent(ontology_id=...)``, not here.  The
+    ``ontology_id`` parameter is accepted for backwards compatibility but
+    is intentionally ignored.  Configuration here only handles:
+      - dataSources
+      - instructions
 
     This is the step that makes the agent aware of *which* data it should query.
     Without this step the agent has no data source and will return empty answers.
@@ -1199,11 +1211,6 @@ def configure_dataagent(
             "itemId": lakehouse_id,
         }
 
-    # Build optional ontologies list when an ontology ID is available.
-    ontologies_config: List[Dict[str, Any]] = (
-        [{"id": ontology_id}] if ontology_id else []
-    )
-
     def _make_config(ds: Dict[str, Any], include_instructions: bool) -> Dict[str, Any]:
         cfg: Dict[str, Any] = {"dataSources": [ds]}
         if include_instructions:
@@ -1212,24 +1219,24 @@ def configure_dataagent(
                 f"Answer questions about the '{table_name}' table in the Customer360 Lakehouse. "
                 "Provide insights about customer segments, churn risk, lifetime value, and revenue."
             )
-        if ontologies_config:
-            cfg["ontologies"] = ontologies_config
+        # Ontology is intentionally NOT set here — it is attached at agent
+        # creation time in get_or_create_dataagent().
         return cfg
 
     payloads = [
-        # Attempt 1: full payload with data source + instructions (+ ontology if available)
+        # Attempt 1: full payload with data source + instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": _make_config(data_source_primary, include_instructions=True),
         },
-        # Attempt 2: data source without instructions (+ ontology if available)
+        # Attempt 2: data source without instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": _make_config(data_source_primary, include_instructions=False),
         },
-        # Attempt 3: basic linkage, no explicit table selection (+ ontology if available)
+        # Attempt 3: basic linkage, no explicit table selection
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
@@ -2309,6 +2316,148 @@ def attach_ontology_to_agent(
     print("✓ Ontology attached to agent")
 
 
+# ─── Pre-flight cleanup ───────────────────────────────────────────────────────
+
+def _delete_fabric_item(
+    workspace_id: str,
+    item_id: str,
+    item_type: str,
+    display_name: str,
+    token: str,
+) -> None:
+    """Delete a single Fabric workspace item by ID.
+
+    Tries a type-specific REST endpoint first (where available), then falls
+    back to the generic ``/items/{id}`` endpoint.  Failures are logged but
+    never raised.
+
+    DataAgent and Lakehouse each have a dedicated DELETE endpoint in addition
+    to the generic items endpoint.  Ontology and SemanticModel only support the
+    generic endpoint, so they go straight to ``/items/{id}``.
+    """
+    type_path_map: Dict[str, str] = {
+        "DataAgent": f"/workspaces/{workspace_id}/dataAgents/{item_id}",
+        "Lakehouse": f"/workspaces/{workspace_id}/lakehouses/{item_id}",
+    }
+    paths: List[str] = []
+    if item_type in type_path_map:
+        paths.append(type_path_map[item_type])
+    paths.append(f"/workspaces/{workspace_id}/items/{item_id}")
+
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    for path in paths:
+        try:
+            resp = requests.delete(
+                f"{FABRIC_BASE_URL}{path}",
+                headers=auth_headers,
+                timeout=30,
+            )
+            if resp.ok or resp.status_code == 404:
+                print(f"   🗑️  Deleted {item_type} '{display_name}' (ID: {item_id})")
+                return
+        except Exception as exc:
+            print(f"   ⚠️  Delete {item_type} '{display_name}' via {path} failed: {exc}")
+    print(f"   ⚠️  Could not delete {item_type} '{display_name}' — proceeding anyway")
+
+
+def delete_workspace_items(
+    workspace_id: str,
+    token: str,
+    lakehouse_name: str = "",
+    ontology_name: str = "",
+    dataagent_name: str = "",
+) -> None:
+    """
+    Deletes existing Fabric items (Lakehouse, Ontology, DataAgent, SemanticModel)
+    from the workspace before a fresh deployment.
+
+    This ensures a clean-slate re-deploy when ``--force_recreate`` is passed.
+    Each item type is listed and any item whose ``displayName`` matches the
+    supplied name is deleted.  Failures are logged but never fatal.
+
+    Fabric's internal order requires deletion in reverse-dependency order:
+      DataAgent → Ontology → SemanticModel → Lakehouse
+    """
+    print("🧹 Pre-flight cleanup: checking for existing Fabric items to delete...")
+
+    auth_headers = {"Authorization": f"Bearer {token}"}
+
+    # ── 1. Delete DataAgent ───────────────────────────────────────────────────
+    # The dedicated /dataAgents endpoint is tried first because it returns richer
+    # metadata; the generic /items?type=DataAgent endpoint is the fallback.
+    if dataagent_name:
+        try:
+            for path in (
+                f"/workspaces/{workspace_id}/dataAgents",
+                f"/workspaces/{workspace_id}/items?type=DataAgent",
+            ):
+                resp = requests.get(
+                    f"{FABRIC_BASE_URL}{path}", headers=auth_headers, timeout=30
+                )
+                if resp.status_code == 200:
+                    for item in resp.json().get("value", []) or []:
+                        if item.get("displayName") == dataagent_name:
+                            _delete_fabric_item(
+                                workspace_id, item["id"], "DataAgent", dataagent_name, token
+                            )
+                    break
+        except Exception as exc:
+            print(f"   ⚠️  Could not list DataAgents (non-fatal): {exc}")
+
+    # ── 2. Delete Ontology ────────────────────────────────────────────────────
+    if ontology_name:
+        try:
+            resp = requests.get(
+                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items?type=Ontology",
+                headers=auth_headers,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("value", []) or []:
+                    if item.get("displayName") == ontology_name:
+                        _delete_fabric_item(
+                            workspace_id, item["id"], "Ontology", ontology_name, token
+                        )
+        except Exception as exc:
+            print(f"   ⚠️  Could not list Ontologies (non-fatal): {exc}")
+
+    # ── 3. Delete SemanticModel (default model auto-created by Fabric) ────────
+    if lakehouse_name:
+        try:
+            resp = requests.get(
+                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items?type=SemanticModel",
+                headers=auth_headers,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("value", []) or []:
+                    if item.get("displayName") == lakehouse_name:
+                        _delete_fabric_item(
+                            workspace_id, item["id"], "SemanticModel", item["displayName"], token
+                        )
+        except Exception as exc:
+            print(f"   ⚠️  Could not list SemanticModels (non-fatal): {exc}")
+
+    # ── 4. Delete Lakehouse ───────────────────────────────────────────────────
+    if lakehouse_name:
+        try:
+            resp = requests.get(
+                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items?type=Lakehouse",
+                headers=auth_headers,
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                for item in resp.json().get("value", []) or []:
+                    if item.get("displayName") == lakehouse_name:
+                        _delete_fabric_item(
+                            workspace_id, item["id"], "Lakehouse", lakehouse_name, token
+                        )
+        except Exception as exc:
+            print(f"   ⚠️  Could not list Lakehouses (non-fatal): {exc}")
+
+    print("   ✓ Pre-flight cleanup complete.")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> None:
@@ -2352,6 +2501,15 @@ def main(argv=None) -> None:
             "backend can call the Fabric Data Agent query API. "
             "Get it via: az webapp identity show --name <app> --resource-group <rg> "
             "--query principalId -o tsv"
+        ),
+    )
+    parser.add_argument(
+        "--force_recreate",
+        action="store_true",
+        default=False,
+        help=(
+            "Delete existing Fabric items (Lakehouse, Ontology, DataAgent, SemanticModel) "
+            "before running deployment.  Use this for a clean-slate re-deploy."
         ),
     )
 
@@ -2403,6 +2561,17 @@ def main(argv=None) -> None:
                 "   workspace, causing HTTP 404 errors when the backend queries the Data Agent.\n"
                 "   To fix, re-run with --app_service_principal_id <MI-object-id>, or add\n"
                 "   the MI manually via: Fabric portal -> Workspace -> Manage access."
+            )
+
+        # ── 2b. Pre-flight cleanup (--force_recreate) ──────────────────────
+        if args.force_recreate:
+            print("\n🧹 Step 2b: Pre-flight cleanup (--force_recreate)")
+            delete_workspace_items(
+                workspace_id,
+                fabric_token,
+                lakehouse_name=args.lakehouse_name,
+                ontology_name=args.ontology_name,
+                dataagent_name=args.dataagent_name,
             )
 
         # ── 3. Lakehouse ──────────────────────────────────────────────────
@@ -2474,25 +2643,32 @@ def main(argv=None) -> None:
             semantic_model_id=semantic_model_id or "",
         )
 
-        # ── Step 7: Create Data Agent ─────────────────────────────────────
+        # ── Step 7: Create Data Agent (with ontology attached at creation) ─
+        # The ontology is included in the create_config so Fabric follows the
+        # correct internal order: Ontology → Agent creation → Published.
         print("\n🤖 Step 7: Create Data Agent")
-        dataagent_id = create_data_agent(
+        dataagent_id = get_or_create_dataagent(
             workspace_id,
-            semantic_model_id,
+            args.dataagent_name,
+            lakehouse_id,
             fabric_token,
+            table_name=args.table_name,
+            semantic_model_id=semantic_model_id or "",
+            ontology_id=ontology_id or "",
         )
 
-        # ── Step 8: Attach Ontology to Agent ─────────────────────────────
-        print("\n🔗 Step 8: Attach Ontology to Agent")
-        if ontology_id:
-            attach_ontology_to_agent(
-                workspace_id,
-                dataagent_id,
-                ontology_id,
-                fabric_token,
-            )
-        else:
-            print("   ⚠️  Skipping ontology attachment — ontology_id is empty.")
+        # ── Step 8: Configure agent datasource ───────────────────────────
+        # Ontology is NOT included here — it was already attached at creation.
+        print("\n⚙️  Step 8: Configure agent datasource")
+        configure_dataagent(
+            workspace_id,
+            dataagent_id,
+            args.dataagent_name,
+            lakehouse_id,
+            args.table_name,
+            fabric_token,
+            semantic_model_id=semantic_model_id or "",
+        )
 
         # ── Step 9: Validate Data Agent ───────────────────────────────────
         print("\n✅ Step 9: Validate Data Agent")
