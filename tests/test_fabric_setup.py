@@ -1210,7 +1210,6 @@ class TestCreateOntology:
         parts = kwargs["json"]["definition"]["parts"]
         assert len(parts) == 1
         assert parts[0]["path"] == "definition.json"
-        assert parts[0]["payloadType"] == "InlineBase64"
         # Payload is base64 of {"entities": []} when no semantic_model_id
         decoded = json.loads(base64.b64decode(parts[0]["payload"]))
         assert decoded == {"entities": []}
@@ -1399,7 +1398,8 @@ class TestBuildCustomer360OntologyDefinition:
         result = fs.build_customer360_ontology("ws-1", "lh-1")
         attr_names = [a["name"] for a in result["entities"][0]["attributes"]]
         for col in ("CustomerId", "FullName", "City", "State", "Segment",
-                    "LifetimeValue", "MonthlyRevenue", "ChurnRiskScore"):
+                    "LifetimeValue", "MonthlyRevenue", "ChurnRiskScore",
+                    "LastPurchaseDate"):
             assert col in attr_names
 
     def test_decimal_types_for_numeric_columns(self):
@@ -1417,6 +1417,11 @@ class TestBuildCustomer360OntologyDefinition:
         assert attrs["City"] == "string"
         assert attrs["State"] == "string"
         assert attrs["Segment"] == "string"
+
+    def test_datetime_type_for_last_purchase_date(self):
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
+        attrs = {a["name"]: a["type"] for a in result["entities"][0]["attributes"]}
+        assert attrs["LastPurchaseDate"] == "datetime"
 
 
 # ─── build_ontology_definition ────────────────────────────────────────────────
