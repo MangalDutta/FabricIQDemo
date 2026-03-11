@@ -22,6 +22,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -49,6 +50,14 @@ NAME_RETRY_WAIT = 30       # seconds between retries
 # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology Lakehouse)
 # after an async ontology creation.  Allow this long for all of them to appear.
 ONTOLOGY_PROPAGATION_WAIT_SECONDS = 40
+
+
+def sanitize_name(name: str) -> str:
+    """Return a Fabric-safe display name (alphanumeric / underscores, max 90 chars)."""
+    name = re.sub(r'[^A-Za-z0-9_]', '_', name)
+    if not name or not name[0].isalpha():
+        name = "O_" + name
+    return name[:90]
 
 
 def get_fabric_token() -> str:
@@ -2146,6 +2155,21 @@ def create_ontology(
     """
     print("🧠 Step: Creating Fabric IQ ontology")
 
+    # Check whether the ontology already exists to avoid failures on reruns.
+    try:
+        list_resp = fabric_request(
+            "GET",
+            f"/workspaces/{workspace_id}/items?type=Ontology",
+            token,
+        )
+        for item in list_resp.json().get("value", []):
+            if item.get("displayName") == ontology_name:
+                ontology_id = item["id"]
+                print(f"✓ Found existing ontology: {ontology_name} (ID: {ontology_id})")
+                return ontology_id
+    except Exception as exc:
+        print(f"   [WARN] Could not list ontologies (non-fatal): {exc}. Proceeding to attempt creation.")
+
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
     # Build the base64-encoded ontology definition (required by the API).
@@ -2315,7 +2339,7 @@ def main(argv=None) -> None:
     parser.add_argument(
         "--ontology_name",
         required=False,
-        default="Customer360 Ontology",
+        default="Customer360Ontology",
         help="Display name for the Fabric IQ Ontology to create",
     )
     parser.add_argument(
@@ -2332,6 +2356,7 @@ def main(argv=None) -> None:
     )
 
     args = parser.parse_args(argv)
+    args.ontology_name = sanitize_name(args.ontology_name)
 
     if not os.path.isfile(args.csv_path):
         print(f"❌ CSV file not found: {args.csv_path}", file=sys.stderr)

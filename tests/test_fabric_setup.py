@@ -460,7 +460,7 @@ class TestMain:
             ])
 
         mock_ont.assert_called_once_with(
-            "ws-id", "Customer360 Ontology", "fab-tok", semantic_model_id="sm-id"
+            "ws-id", "Customer360Ontology", "fab-tok", semantic_model_id="sm-id"
         )
         # attach_ontology_to_agent must receive the ontology_id as 3rd positional arg
         assert mock_attach.call_args[0][2] == "ont-id"
@@ -981,11 +981,12 @@ class TestCreateOntology:
         async_resp.headers = {"x-ms-operation-id": "op-abc"}
         async_resp.json.return_value = {}
 
+        empty_list = _ok_response({"value": []})
         list_resp = _ok_response({"value": [{"displayName": "My Ontology", "id": "ont-async"}]})
 
         with patch("requests.post", return_value=async_resp), \
              patch("fabric_setup.poll_operation") as mock_poll, \
-             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("fabric_setup.fabric_request", side_effect=[empty_list, list_resp]), \
              patch("time.sleep"):
             result = fs.create_ontology("ws1", "My Ontology", "tok")
 
@@ -999,11 +1000,12 @@ class TestCreateOntology:
         async_resp.headers = {}
         async_resp.json.return_value = {"operationId": "op-json"}
 
+        empty_list = _ok_response({"value": []})
         list_resp = _ok_response({"value": [{"displayName": "Ont", "id": "ont-j"}]})
 
         with patch("requests.post", return_value=async_resp), \
              patch("fabric_setup.poll_operation") as mock_poll, \
-             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("fabric_setup.fabric_request", side_effect=[empty_list, list_resp]), \
              patch("time.sleep"):
             result = fs.create_ontology("ws1", "Ont", "tok")
 
@@ -1012,8 +1014,10 @@ class TestCreateOntology:
 
     def test_raises_on_failure_status(self):
         """Raises RuntimeError when status code is not 201 or 202."""
+        empty_list = _ok_response({"value": []})
         err_resp = _error_response(500, "Internal Server Error")
-        with patch("requests.post", return_value=err_resp):
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=err_resp):
             with pytest.raises(RuntimeError, match="Ontology creation failed"):
                 fs.create_ontology("ws1", "My Ontology", "tok")
 
@@ -1024,13 +1028,87 @@ class TestCreateOntology:
         async_resp.headers = {"x-ms-operation-id": "op-sleep"}
         async_resp.json.return_value = {}
 
+        empty_list = _ok_response({"value": []})
         list_resp = _ok_response({"value": [{"displayName": "Ont", "id": "ont-s"}]})
 
         sleep_calls = []
         with patch("requests.post", return_value=async_resp), \
              patch("fabric_setup.poll_operation"), \
-             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("fabric_setup.fabric_request", side_effect=[empty_list, list_resp]), \
              patch("time.sleep", side_effect=lambda n: sleep_calls.append(n)):
             fs.create_ontology("ws1", "Ont", "tok")
 
         assert fs.ONTOLOGY_PROPAGATION_WAIT_SECONDS in sleep_calls
+
+
+# ─── sanitize_name ────────────────────────────────────────────────────────────
+
+class TestSanitizeName:
+    def test_replaces_spaces_with_underscores(self):
+        assert fs.sanitize_name("Customer 360 Ontology") == "Customer_360_Ontology"
+
+    def test_replaces_hyphens_with_underscores(self):
+        assert fs.sanitize_name("my-ontology") == "my_ontology"
+
+    def test_replaces_special_chars(self):
+        assert fs.sanitize_name("a!b@c#d") == "a_b_c_d"
+
+    def test_prepends_O_when_starts_with_digit(self):
+        assert fs.sanitize_name("360Customer") == "O_360Customer"
+
+    def test_prepends_O_when_starts_with_underscore(self):
+        assert fs.sanitize_name("_leading") == "O__leading"
+
+    def test_alphabetic_start_unchanged(self):
+        result = fs.sanitize_name("Customer360Ontology")
+        assert result == "Customer360Ontology"
+
+    def test_truncates_to_90_chars(self):
+        long_name = "A" * 100
+        result = fs.sanitize_name(long_name)
+        assert len(result) == 90
+
+    def test_default_ontology_name_is_valid(self):
+        """The hardcoded default 'Customer360Ontology' passes through sanitize_name unchanged."""
+        result = fs.sanitize_name("Customer360Ontology")
+        assert result == "Customer360Ontology"
+
+    def test_legacy_name_with_space_is_sanitized(self):
+        """The old default 'Customer360 Ontology' (with space) is correctly sanitized."""
+        result = fs.sanitize_name("Customer360 Ontology")
+        assert result == "Customer360_Ontology"
+
+    def test_empty_string_does_not_raise(self):
+        """An empty input is handled without raising an IndexError."""
+        result = fs.sanitize_name("")
+        assert result.startswith("O_")
+
+
+# ─── create_ontology – existence check ───────────────────────────────────────
+
+class TestCreateOntologyExistenceCheck:
+    def test_returns_existing_id_without_creating(self):
+        """Returns existing ontology ID and skips creation when ontology already exists."""
+        list_resp = _ok_response({"value": [{"displayName": "Customer360Ontology", "id": "ont-exists"}]})
+        with patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("requests.post") as mock_post:
+            result = fs.create_ontology("ws1", "Customer360Ontology", "tok")
+        mock_post.assert_not_called()
+        assert result == "ont-exists"
+
+    def test_creates_when_no_existing_ontology(self):
+        """Falls through to creation when no existing ontology matches the name."""
+        list_resp = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-new"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("requests.post", return_value=create_resp):
+            result = fs.create_ontology("ws1", "Customer360Ontology", "tok")
+        assert result == "ont-new"
+
+    def test_proceeds_to_create_when_list_raises(self):
+        """Proceeds to creation if the existence check raises (non-fatal)."""
+        create_resp = _ok_response({"id": "ont-fallback"}, status=201)
+        with patch("fabric_setup.fabric_request", side_effect=Exception("network")), \
+             patch("requests.post", return_value=create_resp):
+            result = fs.create_ontology("ws1", "Customer360Ontology", "tok")
+        assert result == "ont-fallback"
