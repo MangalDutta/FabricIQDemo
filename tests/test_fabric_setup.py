@@ -391,8 +391,8 @@ class TestMain:
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
              patch("fabric_setup.create_ontology", return_value="ont-id"), \
-             patch("fabric_setup.create_data_agent", return_value="da-id"), \
-             patch("fabric_setup.attach_ontology_to_agent"):
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -417,8 +417,8 @@ class TestMain:
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
              patch("fabric_setup.create_ontology", return_value="ont-id"), \
-             patch("fabric_setup.create_data_agent", return_value="da-id"), \
-             patch("fabric_setup.attach_ontology_to_agent"):
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -434,7 +434,7 @@ class TestMain:
         mock_sto.assert_not_called()
 
     def test_ontology_created_when_semantic_model_available(self, tmp_path):
-        """main() should call create_ontology when semantic_model_id is set."""
+        """main() should call create_ontology and pass ontology_id to get_or_create_dataagent."""
         csv_file = tmp_path / "customer360.csv"
         csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
 
@@ -448,8 +448,8 @@ class TestMain:
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
              patch("fabric_setup.create_ontology", return_value="ont-id") as mock_ont, \
-             patch("fabric_setup.create_data_agent", return_value="da-id"), \
-             patch("fabric_setup.attach_ontology_to_agent") as mock_attach:
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id") as mock_agent, \
+             patch("fabric_setup.configure_dataagent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -462,8 +462,9 @@ class TestMain:
         mock_ont.assert_called_once_with(
             "ws-id", "Customer360Ontology", "fab-tok", semantic_model_id="sm-id"
         )
-        # attach_ontology_to_agent must receive the ontology_id as 3rd positional arg
-        assert mock_attach.call_args[0][2] == "ont-id"
+        # Ontology must be passed to get_or_create_dataagent at creation time
+        _, agent_kwargs = mock_agent.call_args
+        assert agent_kwargs.get("ontology_id") == "ont-id"
 
     def test_ontology_skipped_when_no_semantic_model(self, tmp_path):
         """main() exits when create_ontology raises (e.g. semantic_model_id is None)."""
@@ -506,8 +507,8 @@ class TestMain:
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
              patch("fabric_setup.create_ontology", return_value="ont-id"), \
-             patch("fabric_setup.create_data_agent", return_value="da-id"), \
-             patch("fabric_setup.attach_ontology_to_agent"):
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -527,6 +528,181 @@ class TestMain:
         assert result["dataagent_id"] == "da-id"
         assert "report_id" not in result
         assert "powerbi_embed_url" not in result
+
+    def test_force_recreate_calls_delete_workspace_items(self, tmp_path):
+        """--force_recreate should invoke delete_workspace_items before deployment."""
+        csv_file = tmp_path / "customer360.csv"
+        csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
+
+        with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
+             patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
+             patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
+             patch("fabric_setup.delete_workspace_items") as mock_del, \
+             patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
+             patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
+             patch("fabric_setup.load_table_from_file"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"):
+            fs.main([
+                "--workspace_name", "ws",
+                "--lakehouse_name", "lh",
+                "--csv_path", str(csv_file),
+                "--table_name", "Customer360",
+                "--dataagent_name", "Agent",
+                "--capacity_id", "cap-guid",
+                "--force_recreate",
+            ])
+
+        mock_del.assert_called_once_with(
+            "ws-id",
+            "fab-tok",
+            lakehouse_name="lh",
+            ontology_name="Customer360Ontology",
+            dataagent_name="Agent",
+        )
+
+    def test_force_recreate_not_called_by_default(self, tmp_path):
+        """delete_workspace_items should NOT be called when --force_recreate is absent."""
+        csv_file = tmp_path / "customer360.csv"
+        csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
+
+        with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
+             patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
+             patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
+             patch("fabric_setup.delete_workspace_items") as mock_del, \
+             patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
+             patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
+             patch("fabric_setup.load_table_from_file"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"):
+            fs.main([
+                "--workspace_name", "ws",
+                "--lakehouse_name", "lh",
+                "--csv_path", str(csv_file),
+                "--table_name", "Customer360",
+                "--dataagent_name", "Agent",
+            ])
+
+        mock_del.assert_not_called()
+
+
+# ─── delete_workspace_items ────────────────────────────────────────────────────
+
+class TestDeleteWorkspaceItems:
+    def test_deletes_dataagent_when_found(self):
+        """Should DELETE the data agent when it exists in the workspace."""
+        list_resp = _ok_response({"value": [{"id": "da-1", "displayName": "MyAgent"}]})
+        del_resp = MagicMock()
+        del_resp.ok = True
+        del_resp.status_code = 200
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete", return_value=del_resp) as mock_del:
+            fs.delete_workspace_items("ws1", "tok", dataagent_name="MyAgent")
+        assert mock_del.called
+
+    def test_deletes_ontology_when_found(self):
+        """Should DELETE the ontology when it exists in the workspace."""
+        list_resp = _ok_response({"value": [{"id": "ont-1", "displayName": "MyOntology"}]})
+        del_resp = MagicMock()
+        del_resp.ok = True
+        del_resp.status_code = 200
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete", return_value=del_resp) as mock_del:
+            fs.delete_workspace_items("ws1", "tok", ontology_name="MyOntology")
+        assert mock_del.called
+
+    def test_deletes_lakehouse_when_found(self):
+        """Should DELETE the lakehouse when it exists in the workspace."""
+        list_resp = _ok_response({"value": [{"id": "lh-1", "displayName": "MyLH", "type": "Lakehouse"}]})
+        del_resp = MagicMock()
+        del_resp.ok = True
+        del_resp.status_code = 200
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete", return_value=del_resp) as mock_del:
+            fs.delete_workspace_items("ws1", "tok", lakehouse_name="MyLH")
+        assert mock_del.called
+
+    def test_does_not_delete_when_name_not_matched(self):
+        """Should NOT delete anything when no item matches the given name."""
+        list_resp = _ok_response({"value": [{"id": "lh-x", "displayName": "OtherLH"}]})
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.delete") as mock_del:
+            fs.delete_workspace_items("ws1", "tok", lakehouse_name="MyLH")
+        mock_del.assert_not_called()
+
+    def test_non_fatal_on_list_exception(self):
+        """Should not raise when listing items fails (network error)."""
+        with patch("requests.get", side_effect=ConnectionError("network down")):
+            # Must not raise
+            fs.delete_workspace_items(
+                "ws1", "tok",
+                lakehouse_name="lh", ontology_name="ont", dataagent_name="da",
+            )
+
+    def test_does_nothing_when_no_names_provided(self):
+        """Should issue no requests when no name arguments are provided (all default to empty strings)."""
+        with patch("requests.get") as mock_get, \
+             patch("requests.delete") as mock_del:
+            fs.delete_workspace_items("ws1", "tok")
+        mock_get.assert_not_called()
+        mock_del.assert_not_called()
+
+
+# ─── get_or_create_dataagent – ontology_id ────────────────────────────────────
+
+class TestGetOrCreateDataagentOntology:
+    def test_ontology_id_included_in_create_config(self):
+        """When ontology_id is provided, create_config must include ontologies."""
+        create_resp = _ok_response({"id": "da-new"}, status=201)
+        list_resp = _ok_response({"value": []})
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.post", return_value=create_resp) as mock_post, \
+             patch("fabric_setup.ensure_agent_published"), \
+             patch("time.sleep"):
+            fs.get_or_create_dataagent(
+                "ws1", "MyAgent", "lh1", "tok", ontology_id="ont-1"
+            )
+        body = mock_post.call_args[1].get("json", {})
+        cfg = body.get("configuration", {})
+        assert cfg.get("ontologies") == [{"id": "ont-1"}]
+
+    def test_ontology_absent_from_create_config_when_not_provided(self):
+        """When ontology_id is empty, create_config must NOT include ontologies."""
+        create_resp = _ok_response({"id": "da-new"}, status=201)
+        list_resp = _ok_response({"value": []})
+        with patch("requests.get", return_value=list_resp), \
+             patch("requests.post", return_value=create_resp) as mock_post, \
+             patch("fabric_setup.ensure_agent_published"), \
+             patch("time.sleep"):
+            fs.get_or_create_dataagent("ws1", "MyAgent", "lh1", "tok")
+        body = mock_post.call_args[1].get("json", {})
+        cfg = body.get("configuration", {})
+        assert "ontologies" not in cfg
+
+
+# ─── configure_dataagent – ontology NOT included ──────────────────────────────
+
+class TestConfigureDataagentNoOntology:
+    def test_ontology_not_in_patch_payload_even_when_id_provided(self):
+        """configure_dataagent must NOT include ontologies in the PATCH payload."""
+        ok_resp = _ok_response({}, 200)
+        with patch("requests.request", return_value=ok_resp) as mock_req, \
+             patch("fabric_setup.ensure_agent_published"):
+            fs.configure_dataagent(
+                "ws1", "ag1", "Agent", "lh1", "Customer360", "tok",
+                ontology_id="ont-999",
+            )
+        first_call_kwargs = mock_req.call_args_list[0][1]
+        cfg = first_call_kwargs.get("json", {}).get("configuration", {})
+        assert "ontologies" not in cfg
 
 
 # ─── configure_dataagent ──────────────────────────────────────────────────────
