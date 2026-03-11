@@ -2152,6 +2152,51 @@ def get_or_create_ontology(
 
 # ─── Fabric IQ Ontology (simplified) ─────────────────────────────────────────
 
+def build_customer360_ontology_definition(
+    workspace_id: str,
+    lakehouse_id: str,
+) -> Dict[str, Any]:
+    """Builds the Customer360 ontology definition with full LakehouseTable entity bindings.
+
+    The returned dict encodes a ``Customer`` entity backed by the ``Customer360``
+    Delta table in the specified Lakehouse.  Each attribute carries the correct
+    Fabric ontology type (``"string"`` or ``"decimal"``) so that the Ontology UI
+    shows the binding tab pointing at the Lakehouse table.
+
+    Args:
+        workspace_id: Fabric workspace GUID.
+        lakehouse_id: Fabric Lakehouse item GUID (the ``itemId``).
+
+    Returns:
+        A dict ready to be JSON-serialised and base64-encoded as the
+        ``definition.json`` payload sent to the Fabric ontologies API.
+    """
+    return {
+        "entities": [
+            {
+                "name": "Customer",
+                "key": "CustomerId",
+                "source": {
+                    "type": "LakehouseTable",
+                    "workspaceId": workspace_id,
+                    "itemId": lakehouse_id,
+                    "table": "Customer360",
+                },
+                "attributes": [
+                    {"name": "CustomerId", "type": "string"},
+                    {"name": "FullName", "type": "string"},
+                    {"name": "City", "type": "string"},
+                    {"name": "State", "type": "string"},
+                    {"name": "Segment", "type": "string"},
+                    {"name": "LifetimeValue", "type": "decimal"},
+                    {"name": "MonthlyRevenue", "type": "decimal"},
+                    {"name": "ChurnRiskScore", "type": "decimal"},
+                ],
+            }
+        ]
+    }
+
+
 def build_ontology_definition(
     entity_name: str,
     table_name: str,
@@ -2221,6 +2266,7 @@ def create_ontology(
     ontology_name: str,
     token: str,
     semantic_model_id: str = "",
+    lakehouse_id: str = "",
     table_name: str = "",
     columns: Optional[List[Dict[str, str]]] = None,
 ) -> str:
@@ -2230,12 +2276,13 @@ def create_ontology(
     For the async case the long-running operation is polled until it succeeds and
     then the ontology ID is fetched by listing workspace ontologies.
 
-    When *semantic_model_id* is provided the inner ``definition.json`` embeds
-    the semantic model reference so Fabric IQ can automatically derive the
-    schema.  Otherwise, when *table_name* and *columns* are provided, a
-    full entity definition is built via :func:`build_ontology_definition` so
-    the ontology is not empty.  Callers that supply neither fall back to an
-    empty ``{"entities": []}`` definition.
+    Definition priority order:
+      1. *semantic_model_id* provided → Fabric IQ derives schema automatically.
+      2. *lakehouse_id* provided → full Customer360 entity with LakehouseTable
+         binding via :func:`build_customer360_ontology_definition`.
+      3. *table_name* + *columns* provided → generic entity definition via
+         :func:`build_ontology_definition`.
+      4. Neither provided → empty ``{"entities": []}`` fallback.
 
     Raises RuntimeError when creation fails.
     """
@@ -2261,10 +2308,13 @@ def create_ontology(
     # Build the base64-encoded ontology definition (required by the API).
     # Priority order:
     #   1. Semantic model reference  → Fabric IQ derives schema automatically.
-    #   2. Explicit table + columns  → full entity definition with attributes.
-    #   3. Neither provided          → empty entities list (fallback).
+    #   2. Lakehouse binding         → Customer360 entity with LakehouseTable source.
+    #   3. Explicit table + columns  → full entity definition with attributes.
+    #   4. Neither provided          → empty entities list (fallback).
     if semantic_model_id:
         ontology_definition: Dict[str, Any] = {"semanticModelId": semantic_model_id}
+    elif lakehouse_id:
+        ontology_definition = build_customer360_ontology_definition(workspace_id, lakehouse_id)
     elif table_name and columns:
         ontology_definition = build_ontology_definition(table_name, table_name, columns)
     else:
@@ -2729,6 +2779,7 @@ def main(argv=None) -> None:
             args.ontology_name,
             fabric_token,
             semantic_model_id=semantic_model_id or "",
+            lakehouse_id=lakehouse_id,
             table_name=args.table_name,
             columns=csv_columns or None,
         )
