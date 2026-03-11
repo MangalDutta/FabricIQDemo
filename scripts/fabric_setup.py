@@ -36,8 +36,6 @@ FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"   # OneLake ADLS Gen2 upload
 FABRIC_BASE_URL = "https://api.fabric.microsoft.com/v1"
 ONELAKE_DFS_URL = "https://onelake.dfs.fabric.microsoft.com"
-POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
-POWERBI_BASE_URL = "https://api.powerbi.com/v1.0/myorg"
 
 # ─── Polling config ──────────────────────────────────────────────────────────
 POLL_INTERVAL_SECONDS = 5
@@ -1514,7 +1512,7 @@ def validate_dataagent(
     return all_ok
 
 
-# ─── Semantic Model (default Power BI dataset from Lakehouse) ────────────────
+# ─── Semantic Model (default from Lakehouse) ─────────────────────────────────
 
 
 def _get_lakehouse_sm_id(workspace_id: str, lakehouse_id: str, token: str) -> Optional[str]:
@@ -1525,8 +1523,7 @@ def _get_lakehouse_sm_id(workspace_id: str, lakehouse_id: str, token: str) -> Op
       properties.defaultSemanticModel.id
 
     This is the most reliable discovery path because:
-    - Uses Fabric REST API token (NOT Power BI token) — no 'Allow service
-      principals to use Power BI APIs' tenant setting required.
+    - Uses Fabric REST API token — no additional tenant settings required.
     - Authoritative: the ID is stored directly in the Lakehouse metadata.
     - Works even if the semantic model is not yet visible in the Items API.
 
@@ -1723,9 +1720,8 @@ def create_direct_lake_semantic_model(
     Creates a Direct Lake SemanticModel Fabric item via the Fabric Items API.
 
     This is the PRIMARY path for semantic model creation.  It does not rely
-    on createDefaultSemanticModel (which returns HTTP 404 for service
-    principals when 'Allow service principals to use Power BI APIs' is not
-    enabled in the Power BI tenant settings).
+    on createDefaultSemanticModel (which may return HTTP 404 for certain
+    service principal configurations).
 
     Strategy:
       1. POST /v1/workspaces/{wid}/items  (type=SemanticModel, with BIM)
@@ -1855,10 +1851,8 @@ def trigger_default_semantic_model(
     direct-creation path (create_direct_lake_semantic_model) has already
     been attempted.
 
-    This endpoint requires 'Allow service principals to use Power BI APIs'
-    to be enabled in the Power BI tenant settings. It commonly returns 404
-    for service principals where that setting is off — which is non-fatal
-    since the Items API path is tried first.
+    This endpoint may return 404 for certain service principal configurations
+    — which is non-fatal since the Items API path is tried first.
     """
     url = (
         f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
@@ -1901,55 +1895,6 @@ def trigger_default_semantic_model(
         print(f"   [WARN] createDefaultSemanticModel call failed (non-fatal): {exc}")
 
 
-def _find_semantic_model_via_powerbi_api(
-    workspace_id: str,
-    lakehouse_name: str,
-) -> Optional[str]:
-    """
-    Tries to find the semantic model (dataset) using the Power BI REST API.
-
-    Uses a separate token scope ('https://analysis.windows.net/powerbi/api/.default')
-    and queries https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets.
-    The Power BI API sometimes exposes datasets that are not yet visible via the
-    Fabric Items API -- useful for first-run scenarios or workspaces where Fabric
-    has not yet surfaced the default semantic model in the items endpoint.
-
-    Returns the dataset ID string, or None if not found or on error.
-    """
-    try:
-        credential = DefaultAzureCredential()
-        pbi_token = credential.get_token(POWERBI_SCOPE).token
-        pbi_url = f"{POWERBI_BASE_URL}/groups/{workspace_id}/datasets"
-        resp = requests.get(
-            pbi_url,
-            headers={
-                "Authorization": f"Bearer {pbi_token}",
-                "Content-Type": "application/json",
-            },
-            timeout=30,
-        )
-        if not resp.ok:
-            print(
-                f"   [WARN] Power BI API /datasets returned HTTP {resp.status_code}: "
-                f"{resp.text[:200]}"
-            )
-            return None
-        datasets = resp.json().get("value", []) or []
-        names = ", ".join(d.get("name", "?") for d in datasets) or "(none)"
-        print(f"   Power BI API found {len(datasets)} dataset(s): {names}")
-        for ds in datasets:
-            if ds.get("name") == lakehouse_name:
-                ds_id = ds["id"]
-                print(
-                    f"[OK] Found semantic model via Power BI API: "
-                    f"{lakehouse_name} (ID: {ds_id})"
-                )
-                return ds_id
-    except Exception as exc:
-        print(f"   [WARN] Power BI API fallback failed (non-fatal): {exc}")
-    return None
-
-
 def get_default_semantic_model(
     workspace_id: str,
     lakehouse_name: str,
@@ -1959,23 +1904,19 @@ def get_default_semantic_model(
     retries: int = 16,
 ) -> Optional[str]:
     """
-    Finds or creates the Power BI Semantic Model for the Lakehouse.
+    Finds or creates the Fabric Semantic Model for the Lakehouse.
 
     Creation strategy (in order — each is tried before falling back to polling):
       0. Read SM ID from Lakehouse properties  (fastest path; works when Fabric
          already auto-created the model)
       1. Create a Direct Lake SemanticModel item via Fabric Items API  (primary
-         creation path; does NOT require 'Allow service principals to use Power
-         BI APIs' tenant setting — this is what the createDefaultSemanticModel
-         endpoint requires and why it returns 404 for many service principals)
-      2. Call createDefaultSemanticModel as a secondary trigger  (fallback; may
-         succeed on tenants where the Power BI API setting is enabled)
+         creation path)
+      2. Call createDefaultSemanticModel as a secondary trigger  (fallback)
 
     Discovery poll (up to `retries` × 30 s after creation attempts):
       a. Fabric Items API  type=SemanticModel
       b. Every 4th attempt: all-items dump + name-agnostic match
       c. Every 4th attempt: re-read Lakehouse properties
-      d. Every 4th attempt: Power BI REST API datasets fallback
 
     Note: 'Dataset' is NOT a valid Fabric Items API type (HTTP 400
     InvalidItemType) and is deliberately excluded.
@@ -1991,9 +1932,7 @@ def get_default_semantic_model(
         return sm_id
 
     # ── Strategy 1: Create Direct Lake SemanticModel via Fabric Items API ────
-    # This is the PRIMARY creation path. It does not require the Power BI API
-    # tenant setting and avoids the 404 returned by createDefaultSemanticModel
-    # for service principals without that setting enabled.
+    # This is the PRIMARY creation path.
     sql_endpoint_server = _get_sql_endpoint_info(workspace_id, lakehouse_id, token)
     if sql_endpoint_server:
         print(f"   Using SQL endpoint for Direct Lake: {sql_endpoint_server}")
@@ -2005,7 +1944,6 @@ def get_default_semantic_model(
         return sm_id
 
     # ── Strategy 2: createDefaultSemanticModel secondary trigger ─────────────
-    # Kept as a fallback for tenants where the Power BI API setting is enabled.
     trigger_default_semantic_model(workspace_id, lakehouse_id, token)
 
     for attempt in range(1, retries + 1):
@@ -2028,7 +1966,7 @@ def get_default_semantic_model(
         except Exception as exc:
             print(f"   [WARN] SemanticModel lookup failed (non-fatal): {exc}")
 
-        # 2. Every 4th attempt: dump all workspace items + try Power BI REST API
+        # 2. Every 4th attempt: dump all workspace items
         if attempt % 4 == 0:
             # 2a. All-items diagnostic dump + type-agnostic name match
             try:
@@ -2064,12 +2002,6 @@ def get_default_semantic_model(
                 print(f"[OK] Semantic model appeared in Lakehouse properties: {sm_id}")
                 return sm_id
 
-            # 2c. Power BI REST API -- often finds datasets not yet surfaced
-            # in the Fabric Items API (e.g. immediately after first deploy).
-            sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
-            if sm_id:
-                return sm_id
-
         if attempt < retries:
             print(
                 f"   [{attempt}/{retries}] Semantic model not ready yet -- "
@@ -2077,15 +2009,11 @@ def get_default_semantic_model(
             )
             time.sleep(30)
 
-    # Final attempt: Lakehouse properties + Power BI API one last time before giving up.
-    print("   Final fallback: checking Lakehouse properties and Power BI API...")
+    # Final attempt: Lakehouse properties one last time before giving up.
+    print("   Final fallback: checking Lakehouse properties...")
     sm_id = _get_lakehouse_sm_id(workspace_id, lakehouse_id, token)
     if sm_id:
         print(f"[OK] Semantic model found in final Lakehouse properties check: {sm_id}")
-        return sm_id
-    print("   Trying Power BI REST API as final fallback...")
-    sm_id = _find_semantic_model_via_powerbi_api(workspace_id, lakehouse_name)
-    if sm_id:
         return sm_id
 
     print(
@@ -2096,102 +2024,13 @@ def get_default_semantic_model(
         "   1. Provide 'fabric_capacity_id' in the workflow inputs (most common cause).\n"
         "      Without an F-capacity, Fabric does NOT auto-create the Semantic Model.\n"
         "\n"
-        "   2. Enable Power BI tenant setting so the SP can read datasets:\n"
-        "      Power BI Admin Portal -> Tenant settings ->\n"
-        "      'Allow service principals to use Power BI APIs' -> Enable for your SP.\n"
-        "\n"
-        "   3. Ensure your SP is a Workspace Admin:\n"
+        "   2. Ensure your SP is a Workspace Admin:\n"
         f"      https://app.fabric.microsoft.com/groups/{workspace_id} ->\n"
         "      Manage access -> verify your app is listed as Admin.\n"
         "\n"
-        "   Power BI embedding will be skipped for now.\n"
         "   Re-run the workflow with skip_data_upload=true + fabric_capacity_id set.\n"
     )
     return None
-
-
-# ─── Power BI Report ─────────────────────────────────────────────────────────
-
-def get_or_create_powerbi_report(
-    workspace_id: str,
-    report_name: str,
-    semantic_model_id: str,
-    token: str,
-) -> Optional[str]:
-    """
-    Finds or creates a Power BI Report item in the workspace linked to the
-    given semantic model.  Returns the report item ID, or None on failure.
-
-    The report is created as a Fabric Report item via the Fabric Items API.
-    If a Report with the given display name already exists it is reused.
-    """
-    print(f"📊 Checking for Power BI Report: {report_name}")
-
-    # ── Check for an existing report ─────────────────────────────────────────
-    try:
-        list_resp = fabric_request(
-            "GET", f"/workspaces/{workspace_id}/items?type=Report", token
-        )
-        for item in list_resp.json().get("value", []) or []:
-            if item.get("displayName") == report_name:
-                report_id = item["id"]
-                print(f"✓ Found existing Report: {report_name} (ID: {report_id})")
-                return report_id
-    except Exception as exc:
-        print(f"   [WARN] Listing reports failed (non-fatal): {exc}")
-
-    if not semantic_model_id:
-        print(
-            f"   ⚠️  Cannot create report '{report_name}': no semantic model available.\n"
-            "   Power BI embedding will be skipped."
-        )
-        return None
-
-    # ── Create the report via the Power BI REST API ───────────────────────────
-    # The Fabric Items API does not yet support creating Report items from a
-    # semantic model in one call; use the Power BI REST API instead.
-    print(f"📦 Creating Power BI Report: {report_name}")
-    try:
-        credential = DefaultAzureCredential()
-        pbi_token = credential.get_token(POWERBI_SCOPE).token
-        create_url = f"{POWERBI_BASE_URL}/groups/{workspace_id}/reports"
-        payload = {
-            "name": report_name,
-            "datasetId": semantic_model_id,
-        }
-        resp = requests.post(
-            create_url,
-            headers={
-                "Authorization": f"Bearer {pbi_token}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=60,
-        )
-        if resp.ok:
-            report_id = resp.json().get("id")
-            if report_id:
-                print(f"✓ Created Report: {report_name} (ID: {report_id})")
-                return report_id
-        print(
-            f"   ⚠️  Report creation returned HTTP {resp.status_code}: "
-            f"{resp.text[:300]}\n"
-            "   Power BI embedding will be skipped."
-        )
-    except Exception as exc:
-        print(
-            f"   ⚠️  Report creation failed (non-fatal): {exc}\n"
-            "   Power BI embedding will be skipped."
-        )
-    return None
-
-
-def build_powerbi_embed_url(workspace_id: str, report_id: str) -> str:
-    """Returns the standard Power BI embed URL for the given report and workspace."""
-    return (
-        f"https://app.powerbi.com/reportEmbed"
-        f"?reportId={report_id}&groupId={workspace_id}&autoAuth=true"
-    )
 
 
 # ─── Fabric IQ Ontology ───────────────────────────────────────────────────────
@@ -2284,6 +2123,91 @@ def get_or_create_ontology(
     return None
 
 
+# ─── Fabric IQ Ontology (simplified) ─────────────────────────────────────────
+
+def create_ontology(workspace_id: str, semantic_model_id: str, token: str) -> str:
+    """Creates a Fabric IQ Ontology linked to the given semantic model."""
+    print("🧠 Step: Creating Fabric IQ ontology")
+
+    url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/ontologies"
+
+    payload = {
+        "displayName": "Customer360Ontology",
+        "semanticModelId": semantic_model_id,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+
+    if r.status_code not in [200, 201]:
+        raise Exception(f"Ontology creation failed with status {r.status_code}: {r.text}")
+
+    ontology_id = r.json()["id"]
+
+    print(f"✓ Ontology created: {ontology_id}")
+
+    return ontology_id
+
+
+# ─── Fabric Data Agent (simplified) ──────────────────────────────────────────
+
+def create_data_agent(workspace_id: str, semantic_model_id: str, token: str) -> str:
+    """Creates a Fabric Data Agent linked to the given semantic model."""
+    print("🤖 Step: Creating Data Agent")
+
+    url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataAgents"
+
+    payload = {
+        "displayName": "Customer360Agent",
+        "semanticModelId": semantic_model_id,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.post(url, headers=headers, json=payload, timeout=60)
+
+    if r.status_code not in [200, 201]:
+        raise Exception(f"Data agent creation failed with status {r.status_code}: {r.text}")
+
+    agent_id = r.json()["id"]
+
+    print(f"✓ Data agent created: {agent_id}")
+
+    return agent_id
+
+
+def attach_ontology_to_agent(
+    workspace_id: str, agent_id: str, ontology_id: str, token: str
+) -> None:
+    """Attaches a Fabric IQ Ontology to a Data Agent."""
+    print("🔗 Step: Attaching ontology to agent")
+
+    url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/dataAgents/{agent_id}"
+
+    payload = {
+        "ontologyIds": [ontology_id],
+    }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+
+    r = requests.patch(url, headers=headers, json=payload, timeout=60)
+
+    if r.status_code not in [200, 204]:
+        raise Exception(f"Failed attaching ontology with status {r.status_code}: {r.text}")
+
+    print("✓ Ontology attached to agent")
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main(argv=None) -> None:
@@ -2328,12 +2252,6 @@ def main(argv=None) -> None:
             "Get it via: az webapp identity show --name <app> --resource-group <rg> "
             "--query principalId -o tsv"
         ),
-    )
-    parser.add_argument(
-        "--report_name",
-        required=False,
-        default="Customer360 Report",
-        help="Display name for the Power BI report to create or reuse",
     )
 
     args = parser.parse_args(argv)
@@ -2445,51 +2363,33 @@ def main(argv=None) -> None:
             table_name=args.table_name,
         )
 
-        # ── 5a / 6a. Fabric IQ Ontology ──────────────────────────────────
-        ontology_step = "Step 5a" if args.skip_data_upload else "Step 6a"
-        print(f"\n🧠 {ontology_step}: Fabric IQ Ontology")
-        ontology_id: Optional[str] = None
-        if semantic_model_id:
-            ontology_id = get_or_create_ontology(
-                workspace_id, args.ontology_name, semantic_model_id, fabric_token
-            )
-        else:
-            print(
-                "   ⚠️  Skipping ontology creation — no semantic model available.\n"
-                "   The Data Agent will be created without an ontology."
-            )
-
-        # ── 6 / 7. Data Agent ─────────────────────────────────────────────
-        next_step = 6 if args.skip_data_upload else 7
-        print(f"\n🤖 Step {next_step}: Fabric Data Agent")
-        dataagent_id = get_or_create_dataagent(
-            workspace_id, args.dataagent_name, lakehouse_id, fabric_token,
-            table_name=args.table_name,
-            semantic_model_id=semantic_model_id or "",
+        # ── Step 6: Create Ontology ───────────────────────────────────────
+        print("\n🧠 Step 6: Create Ontology")
+        ontology_id = create_ontology(
+            workspace_id,
+            semantic_model_id,
+            fabric_token,
         )
 
-        # ── 6b / 7b. Configure Data Agent (link semantic model + ontology) ─
-        print(f"\n🔗 Step {next_step}b: Configure Data Agent – link data source and ontology")
-        # Re-acquire token before the configure call (previous steps may have
-        # taken long enough for the token to be near expiry).
-        fabric_token = get_fabric_token()
-        configure_dataagent(
+        # ── Step 7: Create Data Agent ─────────────────────────────────────
+        print("\n🤖 Step 7: Create Data Agent")
+        dataagent_id = create_data_agent(
+            workspace_id,
+            semantic_model_id,
+            fabric_token,
+        )
+
+        # ── Step 8: Attach Ontology to Agent ─────────────────────────────
+        print("\n🔗 Step 8: Attach Ontology to Agent")
+        attach_ontology_to_agent(
             workspace_id,
             dataagent_id,
-            args.dataagent_name,
-            lakehouse_id,
-            args.table_name,
+            ontology_id,
             fabric_token,
-            semantic_model_id=semantic_model_id or "",
-            ontology_id=ontology_id or "",
         )
 
-        # ── 6b / 7c. Publish Data Agent ───────────────────────────────────
-        print(f"\n📢 Step {next_step}c: Publish Data Agent")
-        publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
-
-        # ── 6c / 7d. Validate Data Agent ──────────────────────────────────
-        print(f"\n✅ Step {next_step}d: Validate Data Agent")
+        # ── Step 9: Validate Data Agent ───────────────────────────────────
+        print("\n✅ Step 9: Validate Data Agent")
         fabric_token = get_fabric_token()
         validate_dataagent(
             workspace_id, dataagent_id, args.dataagent_name,
@@ -2497,25 +2397,6 @@ def main(argv=None) -> None:
             semantic_model_id=semantic_model_id or "",
             ontology_id=ontology_id or "",
         )
-
-        # ── Power BI Report (step numbering follows skip_data_upload flag) ──
-        report_step = f"Step {next_step}e"
-        print(f"\n📊 {report_step}: Power BI Report")
-        fabric_token = get_fabric_token()
-        report_id: Optional[str] = None
-        powerbi_embed_url = ""
-        if semantic_model_id:
-            report_id = get_or_create_powerbi_report(
-                workspace_id, args.report_name, semantic_model_id, fabric_token
-            )
-            if report_id:
-                powerbi_embed_url = build_powerbi_embed_url(workspace_id, report_id)
-                print(f"   Embed URL: {powerbi_embed_url}")
-        else:
-            print(
-                "   ⚠️  Skipping report creation — no semantic model available.\n"
-                "   Power BI embedding will be skipped."
-            )
 
         workspace_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
 
@@ -2532,8 +2413,6 @@ def main(argv=None) -> None:
             "ontology_id":        ontology_id or "",
             "workspace_url":      workspace_url,
             "capacity_id":        args.capacity_id,
-            "report_id":          report_id or "",
-            "powerbi_embed_url":  powerbi_embed_url,
         }
         print(json.dumps(result, indent=2))
 

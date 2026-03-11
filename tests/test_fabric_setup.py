@@ -388,12 +388,11 @@ class TestMain:
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
              patch("fabric_setup.load_table_from_file"), \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
-             patch("fabric_setup.configure_dataagent"), \
-             patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
-             patch("fabric_setup.get_default_semantic_model", return_value=None), \
-             patch("fabric_setup.get_or_create_ontology", return_value=None):
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.create_data_agent", return_value="da-id"), \
+             patch("fabric_setup.attach_ontology_to_agent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -415,12 +414,11 @@ class TestMain:
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake") as mock_upload, \
              patch("fabric_setup.load_table_from_file") as mock_load, \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
-             patch("fabric_setup.configure_dataagent"), \
-             patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
-             patch("fabric_setup.get_default_semantic_model", return_value=None), \
-             patch("fabric_setup.get_or_create_ontology", return_value=None):
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.create_data_agent", return_value="da-id"), \
+             patch("fabric_setup.attach_ontology_to_agent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -436,7 +434,7 @@ class TestMain:
         mock_sto.assert_not_called()
 
     def test_ontology_created_when_semantic_model_available(self, tmp_path):
-        """main() should call get_or_create_ontology when semantic_model_id is set."""
+        """main() should call create_ontology when semantic_model_id is set."""
         csv_file = tmp_path / "customer360.csv"
         csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
 
@@ -447,12 +445,11 @@ class TestMain:
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
              patch("fabric_setup.load_table_from_file"), \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
-             patch("fabric_setup.configure_dataagent") as mock_configure, \
-             patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
-             patch("fabric_setup.get_or_create_ontology", return_value="ont-id") as mock_ont:
+             patch("fabric_setup.create_ontology", return_value="ont-id") as mock_ont, \
+             patch("fabric_setup.create_data_agent", return_value="da-id"), \
+             patch("fabric_setup.attach_ontology_to_agent") as mock_attach:
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -462,13 +459,12 @@ class TestMain:
                 "--capacity_id", "cap-guid",
             ])
 
-        mock_ont.assert_called_once_with("ws-id", "Customer360 Ontology", "sm-id", "fab-tok")
-        # configure_dataagent must receive ontology_id
-        _, kwargs = mock_configure.call_args
-        assert kwargs.get("ontology_id") == "ont-id"
+        mock_ont.assert_called_once_with("ws-id", "sm-id", "fab-tok")
+        # attach_ontology_to_agent must receive the ontology_id as 3rd positional arg
+        assert mock_attach.call_args[0][2] == "ont-id"
 
     def test_ontology_skipped_when_no_semantic_model(self, tmp_path):
-        """main() must not call get_or_create_ontology when semantic_model_id is None."""
+        """main() exits when create_ontology raises (e.g. semantic_model_id is None)."""
         csv_file = tmp_path / "customer360.csv"
         csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
 
@@ -479,25 +475,22 @@ class TestMain:
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
              patch("fabric_setup.load_table_from_file"), \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
-             patch("fabric_setup.configure_dataagent"), \
-             patch("fabric_setup.publish_dataagent"), \
-             patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value=None), \
-             patch("fabric_setup.get_or_create_ontology") as mock_ont:
-            fs.main([
-                "--workspace_name", "ws",
-                "--lakehouse_name", "lh",
-                "--csv_path", str(csv_file),
-                "--table_name", "Customer360",
-                "--dataagent_name", "Agent",
-                "--capacity_id", "cap-guid",
-            ])
+             patch("fabric_setup.create_ontology", side_effect=Exception("Ontology creation failed: no sm")) as mock_ont:
+            with pytest.raises(SystemExit):
+                fs.main([
+                    "--workspace_name", "ws",
+                    "--lakehouse_name", "lh",
+                    "--csv_path", str(csv_file),
+                    "--table_name", "Customer360",
+                    "--dataagent_name", "Agent",
+                    "--capacity_id", "cap-guid",
+                ])
 
-        mock_ont.assert_not_called()
+        mock_ont.assert_called_once()
 
     def test_result_contains_ontology_id(self, tmp_path, capsys):
-        """Summary JSON must include ontology_id, report_id, and powerbi_embed_url."""
+        """Summary JSON must include ontology_id and dataagent_id."""
         csv_file = tmp_path / "customer360.csv"
         csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
 
@@ -508,14 +501,11 @@ class TestMain:
              patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
              patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
              patch("fabric_setup.load_table_from_file"), \
-             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
-             patch("fabric_setup.configure_dataagent"), \
-             patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
-             patch("fabric_setup.get_or_create_ontology", return_value="ont-id"), \
-             patch("fabric_setup.get_or_create_powerbi_report", return_value="rpt-id"), \
-             patch("fabric_setup.build_powerbi_embed_url", return_value="https://embed.url"):
+             patch("fabric_setup.create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.create_data_agent", return_value="da-id"), \
+             patch("fabric_setup.attach_ontology_to_agent"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -532,8 +522,9 @@ class TestMain:
         json_text = "\n".join(lines[json_start:])
         result = json.loads(json_text)
         assert result["ontology_id"] == "ont-id"
-        assert result["report_id"] == "rpt-id"
-        assert result["powerbi_embed_url"] == "https://embed.url"
+        assert result["dataagent_id"] == "da-id"
+        assert "report_id" not in result
+        assert "powerbi_embed_url" not in result
 
 
 # ─── configure_dataagent ──────────────────────────────────────────────────────
@@ -808,7 +799,6 @@ class TestGetDefaultSemanticModel:
         empty_body = {"value": []}
         with patch("fabric_setup.trigger_default_semantic_model"), \
              patch("requests.request", return_value=_ok_response(empty_body)), \
-             patch("fabric_setup._find_semantic_model_via_powerbi_api", return_value=None), \
              patch("time.sleep"):
             result = fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
         assert result is None
@@ -817,7 +807,6 @@ class TestGetDefaultSemanticModel:
         empty_body = {"value": []}
         with patch("fabric_setup.trigger_default_semantic_model") as mock_trigger, \
              patch("requests.request", return_value=_ok_response(empty_body)), \
-             patch("fabric_setup._find_semantic_model_via_powerbi_api", return_value=None), \
              patch("time.sleep"):
             fs.get_default_semantic_model("ws1", "MyLH", "lh1", "tok", retries=1)
         mock_trigger.assert_called_once_with("ws1", "lh1", "tok")
