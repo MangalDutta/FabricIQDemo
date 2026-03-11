@@ -16,8 +16,6 @@ Choose the deployment option that fits your scenario:
 | [![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Visualize** — View the ARM template resources and dependencies | — |
 
 > **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
-> **Infra only** button → Azure Portal opens → Fill in parameters → **"Review + create"** → **"Create"**.
-> **Visualize** button → Opens an interactive diagram of the ARM template resources.
 
 ### Full Stack — Required Inputs (6 required, 10 optional)
 
@@ -393,4 +391,5 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Backend `/health` returns `{"status":"healthy"}`
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] (Optional) Power BI report embedded in right panel
+
 
