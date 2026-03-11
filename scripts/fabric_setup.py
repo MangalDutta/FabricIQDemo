@@ -2152,7 +2152,7 @@ def get_or_create_ontology(
 
 # ─── Fabric IQ Ontology (simplified) ─────────────────────────────────────────
 
-def build_customer360_ontology_definition(
+def build_customer360_ontology(
     workspace_id: str,
     lakehouse_id: str,
 ) -> Dict[str, Any]:
@@ -2176,22 +2176,23 @@ def build_customer360_ontology_definition(
             {
                 "name": "Customer",
                 "key": "CustomerId",
-                "source": {
-                    "type": "LakehouseTable",
-                    "workspaceId": workspace_id,
-                    "itemId": lakehouse_id,
-                    "table": "Customer360",
-                },
                 "attributes": [
                     {"name": "CustomerId", "type": "string"},
                     {"name": "FullName", "type": "string"},
-                    {"name": "City", "type": "string"},
                     {"name": "State", "type": "string"},
+                    {"name": "City", "type": "string"},
                     {"name": "Segment", "type": "string"},
                     {"name": "LifetimeValue", "type": "decimal"},
                     {"name": "MonthlyRevenue", "type": "decimal"},
                     {"name": "ChurnRiskScore", "type": "decimal"},
                 ],
+                "source": {
+                    "type": "LakehouseTable",
+                    "workspaceId": workspace_id,
+                    "itemId": lakehouse_id,
+                    "schema": "dbo",
+                    "table": "Customer360",
+                },
             }
         ]
     }
@@ -2279,7 +2280,7 @@ def create_ontology(
     Definition priority order:
       1. *semantic_model_id* provided → Fabric IQ derives schema automatically.
       2. *lakehouse_id* provided → full Customer360 entity with LakehouseTable
-         binding via :func:`build_customer360_ontology_definition`.
+         binding via :func:`build_customer360_ontology`.
       3. *table_name* + *columns* provided → generic entity definition via
          :func:`build_ontology_definition`.
       4. Neither provided → empty ``{"entities": []}`` fallback.
@@ -2314,7 +2315,7 @@ def create_ontology(
     if semantic_model_id:
         ontology_definition: Dict[str, Any] = {"semanticModelId": semantic_model_id}
     elif lakehouse_id:
-        ontology_definition = build_customer360_ontology_definition(workspace_id, lakehouse_id)
+        ontology_definition = build_customer360_ontology(workspace_id, lakehouse_id)
     elif table_name and columns:
         ontology_definition = build_ontology_definition(table_name, table_name, columns)
     else:

@@ -1355,57 +1355,62 @@ class TestCreateOntologyExistenceCheck:
         assert result == "ont-fallback"
 
 
-# ─── build_customer360_ontology_definition ────────────────────────────────────
+# ─── build_customer360_ontology ───────────────────────────────────────────────
 
 class TestBuildCustomer360OntologyDefinition:
-    """Tests for the build_customer360_ontology_definition helper."""
+    """Tests for the build_customer360_ontology helper."""
 
     def test_returns_entities_list(self):
         """Result has an 'entities' key containing a single-element list."""
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         assert "entities" in result
         assert len(result["entities"]) == 1
 
     def test_entity_name_is_customer(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         assert result["entities"][0]["name"] == "Customer"
 
     def test_entity_key_is_customer_id(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         assert result["entities"][0]["key"] == "CustomerId"
 
     def test_source_type_is_lakehouse_table(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         assert result["entities"][0]["source"]["type"] == "LakehouseTable"
 
     def test_source_embeds_workspace_id(self):
-        result = fs.build_customer360_ontology_definition("ws-abc", "lh-1")
+        result = fs.build_customer360_ontology("ws-abc", "lh-1")
         assert result["entities"][0]["source"]["workspaceId"] == "ws-abc"
 
     def test_source_embeds_lakehouse_id(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-xyz")
+        result = fs.build_customer360_ontology("ws-1", "lh-xyz")
         assert result["entities"][0]["source"]["itemId"] == "lh-xyz"
 
     def test_source_table_is_customer360(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         assert result["entities"][0]["source"]["table"] == "Customer360"
 
+    def test_source_schema_is_dbo(self):
+        """Source binding includes schema 'dbo'."""
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
+        assert result["entities"][0]["source"]["schema"] == "dbo"
+
     def test_attributes_include_expected_columns(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         attr_names = [a["name"] for a in result["entities"][0]["attributes"]]
         for col in ("CustomerId", "FullName", "City", "State", "Segment",
                     "LifetimeValue", "MonthlyRevenue", "ChurnRiskScore"):
             assert col in attr_names
 
     def test_decimal_types_for_numeric_columns(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         attrs = {a["name"]: a["type"] for a in result["entities"][0]["attributes"]}
         assert attrs["LifetimeValue"] == "decimal"
         assert attrs["MonthlyRevenue"] == "decimal"
         assert attrs["ChurnRiskScore"] == "decimal"
 
     def test_string_types_for_text_columns(self):
-        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        result = fs.build_customer360_ontology("ws-1", "lh-1")
         attrs = {a["name"]: a["type"] for a in result["entities"][0]["attributes"]}
         assert attrs["CustomerId"] == "string"
         assert attrs["FullName"] == "string"
@@ -1575,6 +1580,7 @@ class TestCreateOntologyWithTableSchema:
         assert entity["source"]["workspaceId"] == "ws1"
         assert entity["source"]["itemId"] == "lh-001"
         assert entity["source"]["table"] == "Customer360"
+        assert entity["source"]["schema"] == "dbo"
 
     def test_semantic_model_takes_priority_over_lakehouse_id(self):
         """When semantic_model_id is provided, it takes priority over lakehouse_id."""
