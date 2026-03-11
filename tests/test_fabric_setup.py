@@ -687,6 +687,63 @@ class TestGetOrCreateDataagentOntology:
         cfg = body.get("configuration", {})
         assert "ontologies" not in cfg
 
+    def test_fallback_items_api_includes_configuration_with_data_sources(self):
+        """Fallback Items API path must send configuration.dataSources at creation time."""
+        # Simulate the primary dataAgents endpoint raising an exception so the
+        # fallback Items API path is exercised.  The side_effect callable only
+        # raises for the dedicated dataAgents URL so that any other requests.get
+        # calls (e.g. the async 202 re-fetch) behave normally.
+        create_resp = _ok_response({"id": "da-fallback"}, status=201)
+        empty_list = _ok_response({"value": []})
+
+        def _get_side_effect(url, **kwargs):
+            if "dataAgents" in url:
+                raise Exception("dataAgents endpoint unavailable")
+            return empty_list
+
+        with patch("requests.get", side_effect=_get_side_effect), \
+             patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post, \
+             patch("fabric_setup.ensure_agent_published"), \
+             patch("time.sleep"):
+            result = fs.get_or_create_dataagent(
+                "ws1", "MyAgent", "lh1", "tok",
+                semantic_model_id="sm-1",
+            )
+        assert result == "da-fallback"
+        body = mock_post.call_args[1].get("json", {})
+        # Must include type=DataAgent
+        assert body.get("type") == "DataAgent"
+        # Must include configuration with dataSources at creation time
+        cfg = body.get("configuration", {})
+        assert cfg.get("dataSources") == [
+            {"type": "SemanticModel", "workspaceId": "ws1", "itemId": "sm-1"}
+        ]
+
+    def test_fallback_items_api_includes_ontology_in_configuration(self):
+        """Fallback Items API path must include ontologies in configuration when provided."""
+        create_resp = _ok_response({"id": "da-fallback-ont"}, status=201)
+        empty_list = _ok_response({"value": []})
+
+        def _get_side_effect(url, **kwargs):
+            if "dataAgents" in url:
+                raise Exception("dataAgents endpoint unavailable")
+            return empty_list
+
+        with patch("requests.get", side_effect=_get_side_effect), \
+             patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post, \
+             patch("fabric_setup.ensure_agent_published"), \
+             patch("time.sleep"):
+            fs.get_or_create_dataagent(
+                "ws1", "MyAgent", "lh1", "tok",
+                semantic_model_id="sm-1",
+                ontology_id="ont-42",
+            )
+        body = mock_post.call_args[1].get("json", {})
+        cfg = body.get("configuration", {})
+        assert cfg.get("ontologies") == [{"id": "ont-42"}]
+
 
 # ─── configure_dataagent – ontology NOT included ──────────────────────────────
 
