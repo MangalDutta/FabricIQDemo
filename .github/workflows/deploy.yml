@@ -573,6 +573,12 @@ jobs:
             echo "  Re-run workflow with powerbi_report_url set to embed it."
           fi
           echo ""
+          echo "Notebooks:"
+          echo "  Deployed   : ${{ steps.fabric_setup.outputs.notebooks_deployed }} notebook(s) to Fabric workspace"
+          echo "  Location   : ${{ steps.fabric_setup.outputs.workspace_url }}"
+          echo "  Notebooks  : 00_setup_and_load_data, 01_create_semantic_model,"
+          echo "                02_create_ontology, 03_create_data_agent, 04_query_agent"
+          echo ""
           echo "Backend env vars set:"
           echo "  FABRIC_WORKSPACE_ID = ${{ steps.fabric_setup.outputs.workspace_id }}"
           echo "  FABRIC_DATAAGENT_ID = ${{ steps.fabric_setup.outputs.dataagent_id }}"
