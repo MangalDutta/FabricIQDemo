@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import importlib
+from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 import pytest
 
@@ -460,7 +461,13 @@ class TestMain:
             ])
 
         mock_ont.assert_called_once_with(
-            "ws-id", "Customer360Ontology", "fab-tok", semantic_model_id="sm-id"
+            "ws-id", "Customer360Ontology", "fab-tok",
+            semantic_model_id="sm-id",
+            table_name="Customer360",
+            columns=[
+                {"name": "CustomerId", "valueType": "String"},
+                {"name": "FullName", "valueType": "String"},
+            ],
         )
         # Ontology must be passed to get_or_create_dataagent at creation time
         _, agent_kwargs = mock_agent.call_args
@@ -1345,3 +1352,171 @@ class TestCreateOntologyExistenceCheck:
              patch("requests.post", return_value=create_resp):
             result = fs.create_ontology("ws1", "Customer360Ontology", "tok")
         assert result == "ont-fallback"
+
+
+# ─── build_ontology_definition ────────────────────────────────────────────────
+
+class TestBuildOntologyDefinition:
+    """Tests for the build_ontology_definition helper."""
+
+    _COLUMNS = [
+        {"name": "CustomerId", "valueType": "String"},
+        {"name": "FullName", "valueType": "String"},
+        {"name": "LifetimeValue", "valueType": "Double"},
+    ]
+
+    def test_returns_entities_list(self):
+        """Result has an 'entities' key containing a single-element list."""
+        result = fs.build_ontology_definition("Customer", "Customer360", self._COLUMNS)
+        assert "entities" in result
+        assert len(result["entities"]) == 1
+
+    def test_entity_name_is_set(self):
+        result = fs.build_ontology_definition("Customer", "Customer360", self._COLUMNS)
+        assert result["entities"][0]["name"] == "Customer"
+
+    def test_source_table_is_set(self):
+        result = fs.build_ontology_definition("Customer", "Customer360", self._COLUMNS)
+        assert result["entities"][0]["source"] == {"table": "Customer360"}
+
+    def test_attributes_match_columns(self):
+        result = fs.build_ontology_definition("Customer", "Customer360", self._COLUMNS)
+        assert result["entities"][0]["attributes"] == self._COLUMNS
+
+    def test_empty_columns_produces_empty_attributes(self):
+        result = fs.build_ontology_definition("Entity", "mytable", [])
+        assert result["entities"][0]["attributes"] == []
+
+
+# ─── infer_columns_from_csv ───────────────────────────────────────────────────
+
+class TestInferColumnsFromCsv:
+    """Tests for the infer_columns_from_csv helper."""
+
+    def test_string_columns_detected(self, tmp_path):
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("Name,City\nAlice,London\n")
+        result = fs.infer_columns_from_csv(str(csv_file))
+        types = {col["name"]: col["valueType"] for col in result}
+        assert types["Name"] == "String"
+        assert types["City"] == "String"
+
+    def test_numeric_columns_detected_as_double(self, tmp_path):
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("Score,Revenue\n0.75,1234.56\n")
+        result = fs.infer_columns_from_csv(str(csv_file))
+        types = {col["name"]: col["valueType"] for col in result}
+        assert types["Score"] == "Double"
+        assert types["Revenue"] == "Double"
+
+    def test_mixed_columns(self, tmp_path):
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("Id,Name,Score\nC001,Alice,0.9\n")
+        result = fs.infer_columns_from_csv(str(csv_file))
+        types = {col["name"]: col["valueType"] for col in result}
+        assert types["Id"] == "String"
+        assert types["Name"] == "String"
+        assert types["Score"] == "Double"
+
+    def test_column_order_preserved(self, tmp_path):
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("Z,A,M\n1,2,3\n")
+        result = fs.infer_columns_from_csv(str(csv_file))
+        names = [col["name"] for col in result]
+        assert names == ["Z", "A", "M"]
+
+    def test_customer360_csv_schema(self):
+        """The real sample CSV produces the expected Customer360 column schema."""
+        csv_path = Path(__file__).parent.parent / "sample-data" / "customer360.csv"
+        result = fs.infer_columns_from_csv(str(csv_path))
+        names = [col["name"] for col in result]
+        assert "CustomerId" in names
+        assert "FullName" in names
+        assert "State" in names
+        assert "City" in names
+        # Numeric columns should be Double
+        types = {col["name"]: col["valueType"] for col in result}
+        assert types["LifetimeValue"] == "Double"
+        assert types["MonthlyRevenue"] == "Double"
+        assert types["ChurnRiskScore"] == "Double"
+        # Text columns should be String
+        assert types["CustomerId"] == "String"
+        assert types["FullName"] == "String"
+
+
+# ─── create_ontology – entity definition from table schema ────────────────────
+
+class TestCreateOntologyWithTableSchema:
+    """Tests for create_ontology when table_name + columns are provided."""
+
+    _COLUMNS = [
+        {"name": "CustomerId", "valueType": "String"},
+        {"name": "FullName", "valueType": "String"},
+        {"name": "LifetimeValue", "valueType": "Double"},
+    ]
+
+    def test_entity_definition_embedded_when_table_and_columns_given(self):
+        """definition.json contains a proper entity when table_name and columns are provided."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-entity"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology(
+                "ws1", "Customer360Ontology", "tok",
+                table_name="Customer360",
+                columns=self._COLUMNS,
+            )
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert "entities" in decoded
+        assert len(decoded["entities"]) == 1
+        entity = decoded["entities"][0]
+        assert entity["name"] == "Customer360"
+        assert entity["source"] == {"table": "Customer360"}
+        assert entity["attributes"] == self._COLUMNS
+
+    def test_semantic_model_takes_priority_over_table_schema(self):
+        """When semantic_model_id is provided, it takes priority over table/columns."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-sm"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology(
+                "ws1", "Customer360Ontology", "tok",
+                semantic_model_id="sm-001",
+                table_name="Customer360",
+                columns=self._COLUMNS,
+            )
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"semanticModelId": "sm-001"}
+
+    def test_empty_entities_when_no_schema_and_no_semantic_model(self):
+        """Falls back to empty entities list when neither semantic_model_id nor columns are given."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-empty"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology("ws1", "Customer360Ontology", "tok")
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"entities": []}
+
+    def test_empty_entities_when_columns_list_is_none(self):
+        """Falls back to empty entities list when columns=None (even with table_name)."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-none"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology(
+                "ws1", "Customer360Ontology", "tok",
+                table_name="Customer360",
+                columns=None,
+            )
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"entities": []}

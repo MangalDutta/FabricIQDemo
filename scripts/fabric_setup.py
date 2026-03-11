@@ -2152,17 +2152,90 @@ def get_or_create_ontology(
 
 # ─── Fabric IQ Ontology (simplified) ─────────────────────────────────────────
 
+def build_ontology_definition(
+    entity_name: str,
+    table_name: str,
+    columns: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Builds an ontology definition dict with entity schema for definition.json.
+
+    Args:
+        entity_name: Conceptual entity name (e.g. ``"Customer"``).
+        table_name:  Source table name in the Lakehouse (e.g. ``"Customer360"``).
+        columns:     List of ``{"name": ..., "valueType": ...}`` dicts describing
+                     each attribute.  Supported valueTypes: ``"String"``,
+                     ``"Double"``, ``"Int64"``, ``"Boolean"``, ``"DateTime"``.
+
+    Returns:
+        A dict ready to be JSON-serialised and base64-encoded as the
+        ``definition.json`` payload sent to the Fabric ontologies API.
+    """
+    return {
+        "entities": [
+            {
+                "name": entity_name,
+                "source": {"table": table_name},
+                "attributes": columns,
+            }
+        ]
+    }
+
+
+def infer_columns_from_csv(csv_path: str) -> List[Dict[str, str]]:
+    """Infers column definitions from a CSV file header row.
+
+    Each column receives a ``valueType`` of ``"Double"`` when the first data
+    row contains a parseable float, or ``"String"`` otherwise.  Only these two
+    value types are used; no attempt is made to distinguish integers, booleans,
+    or date strings from general strings.
+
+    Args:
+        csv_path: Absolute or relative path to the CSV file.
+
+    Returns:
+        List of ``{"name": <header>, "valueType": <"String"|"Double">}`` dicts
+        in the order the columns appear in the file.
+    """
+    import csv as _csv
+
+    with open(csv_path, newline="", encoding="utf-8") as fh:
+        reader = _csv.DictReader(fh)
+        headers: List[str] = list(reader.fieldnames or [])
+        first_row: Dict[str, str] = next(iter(reader), {})
+
+    columns: List[Dict[str, str]] = []
+    for header in headers:
+        value_type = "String"
+        raw = first_row.get(header, "")
+        try:
+            float(raw)
+            value_type = "Double"
+        except (ValueError, TypeError):
+            pass
+        columns.append({"name": header, "valueType": value_type})
+    return columns
+
+
 def create_ontology(
     workspace_id: str,
     ontology_name: str,
     token: str,
     semantic_model_id: str = "",
+    table_name: str = "",
+    columns: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Creates a Fabric IQ Ontology, optionally linked to a semantic model.
 
     Handles both synchronous (HTTP 201) and asynchronous (HTTP 202) provisioning.
     For the async case the long-running operation is polled until it succeeds and
     then the ontology ID is fetched by listing workspace ontologies.
+
+    When *semantic_model_id* is provided the inner ``definition.json`` embeds
+    the semantic model reference so Fabric IQ can automatically derive the
+    schema.  Otherwise, when *table_name* and *columns* are provided, a
+    full entity definition is built via :func:`build_ontology_definition` so
+    the ontology is not empty.  Callers that supply neither fall back to an
+    empty ``{"entities": []}`` definition.
 
     Raises RuntimeError when creation fails.
     """
@@ -2186,10 +2259,14 @@ def create_ontology(
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
     # Build the base64-encoded ontology definition (required by the API).
-    # When a semantic model is provided, embed it in the inner definition so
-    # Fabric IQ can automatically understand the schema columns.
+    # Priority order:
+    #   1. Semantic model reference  → Fabric IQ derives schema automatically.
+    #   2. Explicit table + columns  → full entity definition with attributes.
+    #   3. Neither provided          → empty entities list (fallback).
     if semantic_model_id:
         ontology_definition: Dict[str, Any] = {"semanticModelId": semantic_model_id}
+    elif table_name and columns:
+        ontology_definition = build_ontology_definition(table_name, table_name, columns)
     else:
         ontology_definition = {"entities": []}
 
@@ -2642,11 +2719,18 @@ def main(argv=None) -> None:
 
         # ── Step 6: Create Ontology ───────────────────────────────────────
         print("\n🧠 Step 6: Create Ontology")
+        # Infer column schema from the CSV so the ontology definition.json
+        # contains a proper entity definition when no semantic model is available.
+        csv_columns: List[Dict[str, str]] = []
+        if not args.skip_data_upload and os.path.isfile(args.csv_path):
+            csv_columns = infer_columns_from_csv(args.csv_path)
         ontology_id = create_ontology(
             workspace_id,
             args.ontology_name,
             fabric_token,
             semantic_model_id=semantic_model_id or "",
+            table_name=args.table_name,
+            columns=csv_columns or None,
         )
 
         # ── Step 7: Create Data Agent (with ontology attached at creation) ─
