@@ -56,13 +56,37 @@ on:
         type: string
         default: ''
 
-# Hardcoded defaults (not exposed as inputs to stay within the 10-input limit):
-#   base_name       = cust360
-#   environment     = dev
-#   lakehouse_name  = Customer360Lakehouse
-#   table_name      = Customer360
-#   dataagent_name  = Customer360Agent
-# Resource names will be: acr-cust360dev, app-cust360-backend-dev, app-cust360-frontend-dev, etc.
+      # --- Naming / customisation ---
+      base_name:
+        description: 'Base name prefix for all Azure resources (e.g. acr-<base_name><env>, app-<base_name>-backend-<env>)'
+        required: false
+        type: string
+        default: 'cust360'
+      environment:
+        description: 'Environment suffix appended to resource names (dev, test, prod)'
+        required: false
+        type: string
+        default: 'dev'
+      lakehouse_name:
+        description: 'Fabric Lakehouse display name to create or reuse'
+        required: false
+        type: string
+        default: 'Customer360Lakehouse'
+      table_name:
+        description: 'Delta table name inside the Lakehouse'
+        required: false
+        type: string
+        default: 'Customer360'
+      dataagent_name:
+        description: 'Fabric Data Agent display name to create or reuse'
+        required: false
+        type: string
+        default: 'Customer360Agent'
+      report_name:
+        description: 'Power BI report display name to create or reuse'
+        required: false
+        type: string
+        default: 'Customer360 Report'
 
 jobs:
   deploy:
@@ -100,9 +124,12 @@ jobs:
             # Pre-check: if the capacity already exists (e.g. from a previous run),
             # skip the fabricSku param so Bicep does not try to re-create it and
             # hit a globally-unique name conflict in the Fabric RP.
+            # Derive the Fabric capacity display name the same way main.bicep does:
+            # lowercase(baseName) + lowercase(env), hyphens removed.
+            CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+
             FABRIC_PARAMS=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              CAP_DISPLAY_NAME="capcust360dev"
               FABRIC_TOKEN=$(az account get-access-token --resource https://api.fabric.microsoft.com --query accessToken -o tsv 2>/dev/null || true)
               CAP_ALREADY_EXISTS=""
               if [ -n "$FABRIC_TOKEN" ]; then
@@ -138,8 +165,8 @@ jobs:
               --resource-group "${{ inputs.resource_group }}" \
               --template-file infra/main.bicep \
               --parameters \
-                baseName="cust360" \
-                env="dev" \
+                baseName="${{ inputs.base_name }}" \
+                env="${{ inputs.environment }}" \
                 location="${{ inputs.location }}" \
                 $FABRIC_PARAMS \
               --output table; then
@@ -175,7 +202,7 @@ jobs:
             # assignment API requires.
             FABRIC_CAP_ID=""
             if [ -n "${{ inputs.fabric_sku }}" ]; then
-              CAP_DISPLAY_NAME="capcust360dev"
+              CAP_DISPLAY_NAME="cap$(echo '${{ inputs.base_name }}${{ inputs.environment }}' | tr '[:upper:]' '[:lower:]' | tr -d '-')"
               echo "  Looking up Fabric capacity GUID for: $CAP_DISPLAY_NAME"
 
               FABRIC_TOKEN=$(az account get-access-token \
@@ -276,12 +303,12 @@ jobs:
 
           python scripts/fabric_setup.py \
             --workspace_name "${{ inputs.workspace_name }}" \
-            --lakehouse_name "Customer360Lakehouse" \
+            --lakehouse_name "${{ inputs.lakehouse_name }}" \
             --csv_path "sample-data/customer360.csv" \
-            --table_name "Customer360" \
-            --dataagent_name "Customer360Agent" \
+            --table_name "${{ inputs.table_name }}" \
+            --dataagent_name "${{ inputs.dataagent_name }}" \
             --capacity_id "$CAPACITY_ID" \
-            --report_name "Customer360 Report" \
+            --report_name "${{ inputs.report_name }}" \
             $SKIP_FLAG \
             $MI_FLAG
 
@@ -377,7 +404,7 @@ jobs:
               --settings \
                 FABRIC_WORKSPACE_ID="$WORKSPACE_ID" \
                 FABRIC_DATAAGENT_ID="$DATAAGENT_ID" \
-                FABRIC_DATAAGENT_NAME="Customer360Agent" \
+                FABRIC_DATAAGENT_NAME="${{ inputs.dataagent_name }}" \
                 POWERBI_REPORT_URL="$PBI_URL" \
                 POWERBI_REPORT_ID="$PBI_REPORT_ID" \
                 POWERBI_GROUP_ID="$PBI_GROUP_ID" \
@@ -485,7 +512,7 @@ jobs:
             echo "║  To fix:                                                 ║"
             echo "║  1. Open the Fabric portal:                              ║"
             echo "║     https://app.fabric.microsoft.com/groups/$WORKSPACE_ID"
-            echo "║  2. Open the agent 'Customer360Agent'                    ║"
+            echo "║  2. Open the agent '${{ inputs.dataagent_name }}'                    ║"
             echo "║  3. Click 'Publish' in the top ribbon                   ║"
             echo "╚══════════════════════════════════════════════════════════╝"
             echo ""
@@ -538,7 +565,7 @@ jobs:
             echo "  Capacity    : (none specified - using workspace default)"
           fi
           echo "  Workspace URL: ${{ steps.fabric_setup.outputs.workspace_url }}"
-          echo "  Data Agent  : Customer360Agent"
+          echo "  Data Agent  : ${{ inputs.dataagent_name }}"
           echo "  Agent ID    : ${{ steps.fabric_setup.outputs.dataagent_id }}"
           echo ""
           echo "Power BI:"

@@ -19,22 +19,28 @@ Choose the deployment option that fits your scenario:
 > **Infra only** button → Azure Portal opens → Fill in parameters → **"Review + create"** → **"Create"**.
 > **Visualize** button → Opens an interactive diagram of the ARM template resources.
 
-### Full Stack — Required Inputs (6 required, 4 optional)
+### Full Stack — Required Inputs (6 required, 10 optional)
 
-| Input | Required | Where to find it |
-|---|---|---|
-| `azure_subscription_id` | ✅ | Azure Portal → Subscriptions |
-| `azure_tenant_id` | ✅ | Azure Portal → Microsoft Entra ID → Overview |
-| `azure_client_id` | ✅ | Entra ID → App registrations → your app → Application (client) ID |
-| `resource_group` | ✅ | Any name, e.g. `rg-customer360-demo` (created if absent) |
-| `location` | ✅ | Default: `centralindia` |
-| `workspace_name` | ✅ | Pick any name for your Fabric workspace |
-| `fabric_sku` | — | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity |
-| `fabric_capacity_id` | — | Existing capacity GUID (Fabric Admin → Capacity settings) |
-| `skip_data_upload` | — | Set `true` if customer data is already loaded |
-| `powerbi_report_url` | — | Leave blank on first deploy; add the embed URL on re-run |
+| Input | Required | Default | Where to find it |
+|---|---|---|---|
+| `azure_subscription_id` | ✅ | — | Azure Portal → Subscriptions |
+| `azure_tenant_id` | ✅ | — | Azure Portal → Microsoft Entra ID → Overview |
+| `azure_client_id` | ✅ | — | Entra ID → App registrations → your app → Application (client) ID |
+| `resource_group` | ✅ | — | Any name, e.g. `rg-customer360-demo` (created if absent) |
+| `location` | ✅ | `centralindia` | Azure region, e.g. `eastus`, `westeurope` |
+| `workspace_name` | ✅ | — | Pick any name for your Fabric workspace |
+| `fabric_sku` | — | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity |
+| `fabric_capacity_id` | — | *(blank)* | Existing capacity GUID (Fabric Admin → Capacity settings) |
+| `skip_data_upload` | — | `false` | Set `true` if customer data is already loaded |
+| `powerbi_report_url` | — | *(blank)* | Leave blank on first deploy; add the embed URL on re-run |
+| `base_name` | — | `cust360` | Prefix for all Azure resource names (ACR, App Service, etc.) |
+| `environment` | — | `dev` | Environment suffix appended to resource names (`dev`, `test`, `prod`) |
+| `lakehouse_name` | — | `Customer360Lakehouse` | Fabric Lakehouse display name to create or reuse |
+| `table_name` | — | `Customer360` | Delta table name inside the Lakehouse |
+| `dataagent_name` | — | `Customer360Agent` | Fabric Data Agent display name to create or reuse |
+| `report_name` | — | `Customer360 Report` | Power BI report display name to create or reuse |
 
-> Resource names are fixed: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`.
+> With default naming inputs, resource names will be: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`, etc. Change `base_name` and `environment` to customise them.
 
 ### Infra Only — Azure Portal Parameters (Deploy to Azure)
 
@@ -193,13 +199,19 @@ Fill in the inputs:
 | `azure_subscription_id` | `xxxxxxxx-...` | Your Azure sub ID |
 | `azure_tenant_id` | `xxxxxxxx-...` | Your Entra tenant ID |
 | `azure_client_id` | `xxxxxxxx-...` | OIDC app client ID |
-| `resource_group` | `xxxxxxxx` | Created if absent |
+| `resource_group` | `rg-customer360-demo` | Created if absent |
 | `location` | `centralindia` | Azure region |
 | `workspace_name` | `fabricagentdemo` | Fabric workspace name |
 | `fabric_capacity_id` | `44BF8C5D-...` | F-capacity GUID |
 | `powerbi_report_url` | *(leave blank first time)* | See Step 3 |
+| `base_name` | `cust360` | Prefix for Azure resource names |
+| `environment` | `dev` | Environment suffix (`dev`, `test`, `prod`) |
+| `lakehouse_name` | `Customer360Lakehouse` | Fabric Lakehouse name |
+| `table_name` | `Customer360` | Delta table name |
+| `dataagent_name` | `Customer360Agent` | Fabric Data Agent name |
+| `report_name` | `Customer360 Report` | Power BI report name |
 
-> All other inputs have sensible defaults — leave them as-is for a standard demo.
+> The last 6 inputs (naming/customisation) have sensible defaults — leave them as-is for a standard demo deployment.
 
 ### Step 2 — Verify the Deployment
 
