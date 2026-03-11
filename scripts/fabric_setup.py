@@ -2149,24 +2149,26 @@ def create_ontology(
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
     # Build the base64-encoded ontology definition (required by the API).
+    # When a semantic model is provided, embed it in the inner definition so
+    # Fabric IQ can automatically understand the schema columns.
+    if semantic_model_id:
+        ontology_definition: Dict[str, Any] = {"semanticModelId": semantic_model_id}
+    else:
+        ontology_definition = {"entities": []}
+
     ontology_def = base64.b64encode(
-        json.dumps({"entities": []}).encode()
+        json.dumps(ontology_definition).encode()
     ).decode()
 
     definition: Dict[str, Any] = {
         "parts": [
             {
-                "path": "ontology.json",
+                "path": "definition.json",
                 "payload": ontology_def,
                 "payloadType": "InlineBase64",
             }
         ]
     }
-
-    # Bind to the semantic model when provided so the ontology inherits its
-    # schema and the Data Agent can reason over it more accurately.
-    if semantic_model_id:
-        definition["semanticModelId"] = semantic_model_id
 
     payload: Dict[str, Any] = {
         "displayName": ontology_name,
@@ -2204,7 +2206,7 @@ def create_ontology(
 
         # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology
         # Lakehouse) — wait for them to propagate before fetching the ID.
-        print("Waiting for ontology backend resources...")
+        print("Waiting for ontology backend provisioning...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
 
         # Fetch ontology ID after provisioning completes.

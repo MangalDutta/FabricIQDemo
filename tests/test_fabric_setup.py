@@ -932,15 +932,17 @@ class TestCreateOntology:
         assert result == "ont-sync"
 
     def test_sync_201_with_semantic_model_in_payload(self):
-        """Payload includes definition.semanticModelId when semantic_model_id is given."""
+        """Payload inner definition contains semanticModelId when semantic_model_id is given."""
         resp = _ok_response({"id": "ont-sm"}, status=201)
         with patch("requests.post", return_value=resp) as mock_post:
             fs.create_ontology("ws1", "My Ontology", "tok", semantic_model_id="sm-xyz")
         _, kwargs = mock_post.call_args
-        assert kwargs["json"]["definition"]["semanticModelId"] == "sm-xyz"
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"semanticModelId": "sm-xyz"}
 
     def test_no_semantic_model_id_in_definition_when_not_provided(self):
-        """Payload always includes definition.parts; semanticModelId absent when not provided."""
+        """Payload always includes definition.parts; inner payload defaults to entities list."""
         resp = _ok_response({"id": "ont-no-sm"}, status=201)
         with patch("requests.post", return_value=resp) as mock_post:
             fs.create_ontology("ws1", "My Ontology", "tok")
@@ -948,6 +950,8 @@ class TestCreateOntology:
         defn = kwargs["json"]["definition"]
         assert "parts" in defn
         assert "semanticModelId" not in defn
+        decoded = json.loads(base64.b64decode(defn["parts"][0]["payload"]))
+        assert decoded == {"entities": []}
 
     def test_sync_200_returns_id(self):
         """Returns the ontology ID when the API responds with HTTP 200."""
@@ -957,16 +961,16 @@ class TestCreateOntology:
         assert result == "ont-200"
 
     def test_payload_always_includes_parts(self):
-        """Payload definition.parts contains ontology.json regardless of semantic_model_id."""
+        """Payload definition.parts contains definition.json regardless of semantic_model_id."""
         resp = _ok_response({"id": "ont-parts"}, status=201)
         with patch("requests.post", return_value=resp) as mock_post:
             fs.create_ontology("ws1", "My Ontology", "tok")
         _, kwargs = mock_post.call_args
         parts = kwargs["json"]["definition"]["parts"]
         assert len(parts) == 1
-        assert parts[0]["path"] == "ontology.json"
+        assert parts[0]["path"] == "definition.json"
         assert parts[0]["payloadType"] == "InlineBase64"
-        # Payload is base64 of {"entities": []}
+        # Payload is base64 of {"entities": []} when no semantic_model_id
         decoded = json.loads(base64.b64decode(parts[0]["payload"]))
         assert decoded == {"entities": []}
 
