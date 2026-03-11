@@ -866,45 +866,20 @@ def get_or_create_dataagent(
     """
     print(f"🤖 Checking for Data Agent: {dataagent_name}")
 
-    # ── Build creation payload (shared by both the primary and fallback paths) ─
-    # Data sources and ontology are attached at creation time so that Fabric
-    # follows the correct internal provisioning order:
-    #   Create Ontology → Create Agent (with dataSources + ontologies) → Publish
-    # This avoids the need for a post-creation PATCH to link the data source.
-    data_source: Dict[str, Any]
-    if semantic_model_id:
-        data_source = {
-            "type": "SemanticModel",
-            "workspaceId": workspace_id,
-            "itemId": semantic_model_id,
-        }
-    else:
-        data_source = {
-            "type": "Lakehouse",
-            "workspaceId": workspace_id,
-            "itemId": lakehouse_id,
-        }
-        if table_name:
-            data_source["selectedObjects"] = [
-                {"schema": "dbo", "name": table_name, "objectType": "Table"}
-            ]
-    create_config: Dict[str, Any] = {
-        "dataSources": [data_source],
-    }
-    if ontology_id:
-        create_config["ontologies"] = [{"id": ontology_id}]
-    if table_name:
-        create_config["instructions"] = (
-            f"You are a customer analytics assistant. "
-            f"Answer questions about the '{table_name}' table in the "
-            f"Customer360 Lakehouse. Provide insights about customer "
-            f"segments, churn risk, lifetime value, and revenue."
-        )
+    # ── Build creation payload ──────────────────────────────────────────────────
+    # The Fabric Data Agent API ignores the nested `configuration.dataSources`
+    # field during creation.  Instead, use the top-level `semanticModelId` field
+    # (verified working) to link the data source, and `ontologyIds` to attach
+    # the ontology.  If no semantic model is available, the agent is created
+    # without a data source and configured post-creation via PATCH.
     create_payload: Dict[str, Any] = {
         "displayName": dataagent_name,
         "description": "Customer360 conversational analytics agent",
-        "configuration": create_config,
     }
+    if semantic_model_id:
+        create_payload["semanticModelId"] = semantic_model_id
+    if ontology_id:
+        create_payload["ontologyIds"] = [ontology_id]
 
     # ── Try dedicated dataAgents endpoint first ──────────────────────────────
     try:
@@ -2263,6 +2238,126 @@ def infer_columns_from_csv(csv_path: str) -> List[Dict[str, str]]:
     return columns
 
 
+def _build_ontology_parts(
+    workspace_id: str,
+    lakehouse_id: str,
+    table_name: str,
+    columns: Optional[List[Dict[str, str]]] = None,
+) -> List[Dict[str, Any]]:
+    """Builds the multi-part ontology definition using Fabric's EntityTypes format.
+
+    This is the format that actually populates entities and data bindings in the
+    Fabric Ontology UI.  Each entity type gets its own ``EntityTypes/{id}/definition.json``
+    and each data binding gets ``EntityTypes/{id}/DataBindings/{id}.json``.
+
+    This follows the same pattern used in the Trucking Ontology Workshop reference
+    notebooks which has been verified to work end-to-end.
+    """
+    import random as _rng
+    _rng.seed(42)
+    _used: set = set()
+
+    def _gen_id() -> str:
+        while True:
+            v = _rng.randint(10**12, 10**15)
+            if v not in _used:
+                _used.add(v)
+                return str(v)
+
+    def _to_b64(obj: Any) -> str:
+        return base64.b64encode(json.dumps(obj).encode("utf-8")).decode("utf-8")
+
+    # Hard-coded Customer360 schema if columns were not inferred.
+    if not columns:
+        columns = [
+            {"name": "CustomerId",       "valueType": "String"},
+            {"name": "FullName",         "valueType": "String"},
+            {"name": "State",            "valueType": "String"},
+            {"name": "City",             "valueType": "String"},
+            {"name": "Segment",          "valueType": "String"},
+            {"name": "LifetimeValue",    "valueType": "Double"},
+            {"name": "MonthlyRevenue",   "valueType": "Double"},
+            {"name": "ChurnRiskScore",   "valueType": "Double"},
+            {"name": "LastPurchaseDate", "valueType": "DateTime"},
+        ]
+
+    entity_name    = "Customer"
+    key_column     = "CustomerId"
+    display_column = "FullName"
+
+    # Start with the required empty root definition part.
+    parts: List[Dict[str, Any]] = [
+        {"path": "definition.json", "payload": _to_b64({}), "payloadType": "InlineBase64"},
+    ]
+
+    entity_type_id = _gen_id()
+    property_ids: Dict[str, str] = {}
+
+    # Build properties from columns.
+    properties = []
+    for col in columns:
+        prop_id = _gen_id()
+        property_ids[col["name"]] = prop_id
+        properties.append({
+            "id": prop_id,
+            "name": col["name"],
+            "redefines": None,
+            "baseTypeNamespaceType": None,
+            "valueType": col["valueType"],
+        })
+
+    key_prop_id     = property_ids.get(key_column, properties[0]["id"])
+    display_prop_id = property_ids.get(display_column, key_prop_id)
+
+    # Entity type definition.
+    entity_def = {
+        "id": entity_type_id,
+        "namespace": "usertypes",
+        "baseEntityTypeId": None,
+        "name": entity_name,
+        "entityIdParts": [key_prop_id],
+        "displayNamePropertyId": display_prop_id,
+        "namespaceType": "Custom",
+        "visibility": "Visible",
+        "properties": properties,
+        "timeseriesProperties": [],
+    }
+    parts.append({
+        "path": f"EntityTypes/{entity_type_id}/definition.json",
+        "payload": _to_b64(entity_def),
+        "payloadType": "InlineBase64",
+    })
+
+    # Data binding (NonTimeSeries → Lakehouse table).
+    binding_id = str(uuid.uuid4())
+    data_binding = {
+        "id": binding_id,
+        "dataBindingConfiguration": {
+            "dataBindingType": "NonTimeSeries",
+            "propertyBindings": [
+                {
+                    "sourceColumnName": col["name"],
+                    "targetPropertyId": property_ids[col["name"]],
+                }
+                for col in columns
+            ],
+            "sourceTableProperties": {
+                "sourceType": "LakehouseTable",
+                "workspaceId": workspace_id,
+                "itemId": lakehouse_id,
+                "sourceTableName": table_name,
+            },
+        },
+    }
+    parts.append({
+        "path": f"EntityTypes/{entity_type_id}/DataBindings/{binding_id}.json",
+        "payload": _to_b64(data_binding),
+        "payloadType": "InlineBase64",
+    })
+
+    return parts
+
+
 def create_ontology(
     workspace_id: str,
     ontology_name: str,
@@ -2272,19 +2367,14 @@ def create_ontology(
     table_name: str = "",
     columns: Optional[List[Dict[str, str]]] = None,
 ) -> str:
-    """Creates a Fabric IQ Ontology, optionally linked to a semantic model.
+    """Creates a Fabric IQ Ontology with a Customer entity bound to the Lakehouse table.
+
+    Uses the multi-part definition format (EntityTypes + DataBindings) that
+    correctly populates entities and data bindings in the Fabric Ontology UI.
+    This format matches the working pattern from the Trucking Ontology Workshop
+    reference notebooks.
 
     Handles both synchronous (HTTP 201) and asynchronous (HTTP 202) provisioning.
-    For the async case the long-running operation is polled until it succeeds and
-    then the ontology ID is fetched by listing workspace ontologies.
-
-    Definition priority order:
-      1. *semantic_model_id* provided → Fabric IQ derives schema automatically.
-      2. *lakehouse_id* provided → full Customer360 entity with LakehouseTable
-         binding via :func:`build_customer360_ontology`.
-      3. *table_name* + *columns* provided → generic entity definition via
-         :func:`build_ontology_definition`.
-      4. Neither provided → empty ``{"entities": []}`` fallback.
 
     Raises RuntimeError when creation fails.
     """
@@ -2307,39 +2397,23 @@ def create_ontology(
 
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
-    # Build the base64-encoded ontology definition (required by the API).
-    # Priority order:
-    #   1. Semantic model reference  → Fabric IQ derives schema automatically.
-    #   2. Lakehouse binding         → Customer360 entity with LakehouseTable source.
-    #   3. Explicit table + columns  → full entity definition with attributes.
-    #   4. Neither provided          → empty entities list (fallback).
-    if semantic_model_id:
-        ontology_definition: Dict[str, Any] = {"semanticModelId": semantic_model_id}
-    elif lakehouse_id:
-        ontology_definition = build_customer360_ontology(workspace_id, lakehouse_id)
-    elif table_name and columns:
-        ontology_definition = build_ontology_definition(table_name, table_name, columns)
-    else:
-        ontology_definition = {"entities": []}
+    # Always build the full multi-part definition with entity types and data
+    # bindings.  The simpler {"semanticModelId": "..."} format creates an empty
+    # ontology shell — Fabric does NOT auto-derive entities from a semantic
+    # model reference.
+    parts = _build_ontology_parts(
+        workspace_id=workspace_id,
+        lakehouse_id=lakehouse_id,
+        table_name=table_name or "Customer360",
+        columns=columns,
+    )
 
-    definition_b64 = base64.b64encode(
-        json.dumps(ontology_definition).encode()
-    ).decode()
-
-    definition: Dict[str, Any] = {
-        "parts": [
-            {
-                "path": "definition.json",
-                "payload": definition_b64,
-                "payloadType": "InlineBase64",
-            }
-        ]
-    }
+    print(f"   Ontology definition: {len(parts)} parts (entity types + data bindings)")
 
     payload: Dict[str, Any] = {
         "displayName": ontology_name,
-        "description": "Customer360 ontology",
-        "definition": definition,
+        "description": "Customer360 ontology — Customer entity bound to Lakehouse Delta table.",
+        "definition": {"parts": parts},
     }
 
     resp = requests.post(
@@ -2400,6 +2474,53 @@ def create_ontology(
 
 # ─── Notebook Deployment ─────────────────────────────────────────────────────
 
+def _ipynb_to_fabric_py(ipynb_path: str) -> str:
+    """Converts a Jupyter .ipynb file to Fabric's .py notebook format.
+
+    Fabric notebooks use a Python file with special comment markers:
+      ``# Fabric notebook source``
+      ``# METADATA **{...}**``
+      ``# MARKDOWN **{...}**``  for markdown cells
+      ``# CELL **{...}**``      for code cells
+
+    This is the format required by the Fabric Items REST API for notebook
+    creation.  Using raw ``.ipynb`` JSON causes the error:
+    "The file suffix type .ipynb is not supported."
+    """
+    with open(ipynb_path, "r", encoding="utf-8") as fh:
+        nb = json.load(fh)
+
+    lines: List[str] = ["# Fabric notebook source"]
+
+    # METADATA line
+    kernel_info = nb.get("metadata", {}).get("kernelspec", {})
+    kernel_name = kernel_info.get("name", "synapse_pyspark")
+    lines.append(
+        f'# METADATA **{{"kernel_info":{{"name":"{kernel_name}"}},'
+        f'"dependencies":{{"lakehouse":{{}}}}}}**'
+    )
+    lines.append("")
+
+    for cell in nb.get("cells", []):
+        cell_type = cell.get("cell_type", "code")
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+
+        if cell_type == "markdown":
+            lines.append(f'# MARKDOWN **{{"cell_type":"markdown"}}**')
+            # Prefix each line of markdown with '# '
+            for md_line in source.split("\n"):
+                lines.append(f"# {md_line}")
+            lines.append("")
+        else:
+            lines.append(f'# CELL **{{"cell_type":"code"}}**')
+            lines.append(source)
+            lines.append("")
+
+    return "\n".join(lines)
+
+
 def upload_notebooks_to_workspace(
     workspace_id: str,
     notebooks_dir: str,
@@ -2407,9 +2528,10 @@ def upload_notebooks_to_workspace(
 ) -> List[str]:
     """Uploads all .ipynb files from *notebooks_dir* into the Fabric workspace.
 
-    Each notebook is created (or updated) as a Fabric ``Notebook`` item via the
-    Items REST API.  The .ipynb content is base64-encoded and sent as a single
-    definition part.
+    Each notebook is converted from Jupyter ``.ipynb`` format to Fabric's
+    ``.py`` notebook format (with ``# METADATA`` / ``# MARKDOWN`` / ``# CELL``
+    markers) and then created (or updated) as a Fabric ``Notebook`` item via
+    the Items REST API.
 
     Returns a list of created/updated notebook item IDs.
     """
@@ -2443,13 +2565,14 @@ def upload_notebooks_to_workspace(
         filepath = os.path.join(notebooks_dir, filename)
         display_name = filename.replace(".ipynb", "")
 
-        with open(filepath, "rb") as fh:
-            content_b64 = base64.b64encode(fh.read()).decode()
+        # Convert ipynb → Fabric .py format
+        fabric_py_content = _ipynb_to_fabric_py(filepath)
+        content_b64 = base64.b64encode(fabric_py_content.encode("utf-8")).decode()
 
         definition = {
             "parts": [
                 {
-                    "path": "notebook-content.ipynb",
+                    "path": "notebook-content.py",
                     "payload": content_b64,
                     "payloadType": "InlineBase64",
                 }
