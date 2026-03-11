@@ -1210,6 +1210,7 @@ class TestCreateOntology:
         parts = kwargs["json"]["definition"]["parts"]
         assert len(parts) == 1
         assert parts[0]["path"] == "definition.json"
+        assert parts[0]["payloadType"] == "InlineBase64"
         # Payload is base64 of {"entities": []} when no semantic_model_id
         decoded = json.loads(base64.b64decode(parts[0]["payload"]))
         assert decoded == {"entities": []}
