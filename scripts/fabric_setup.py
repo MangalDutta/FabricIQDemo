@@ -4,8 +4,9 @@ Fabric Customer360 Setup Script
 --------------------------------
 Creates/finds Fabric workspace, binds to capacity, creates Lakehouse,
 uploads CSV to OneLake Files, loads CSV as a Delta table, creates the
-Fabric Data Agent connected to that Lakehouse, and locates the default
-Semantic Model + Power BI Report for embedding.
+Fabric Data Agent connected to that Lakehouse, locates the default
+Semantic Model, creates a Fabric IQ Ontology, and attaches the ontology
+to the Data Agent.
 
 Usage:
     python fabric_setup.py \
@@ -1048,6 +1049,7 @@ def configure_dataagent(
     table_name: str,
     token: str,
     semantic_model_id: str = "",
+    ontology_id: str = "",
 ) -> None:
     """
     Updates the Data Agent configuration to link it to a data source.
@@ -1055,6 +1057,9 @@ def configure_dataagent(
     When *semantic_model_id* is provided the agent is linked to the semantic
     model (recommended — this makes the data source visible in the Fabric
     portal Explorer pane).  Otherwise falls back to Lakehouse linkage.
+
+    When *ontology_id* is provided the agent is also linked to the Fabric IQ
+    Ontology, which improves natural-language query accuracy.
 
     This is the step that makes the agent aware of *which* data it should query.
     Without this step the agent has no data source and will return empty answers.
@@ -1182,35 +1187,41 @@ def configure_dataagent(
             "itemId": lakehouse_id,
         }
 
+    # Build optional ontologies list when an ontology ID is available.
+    ontologies_config: List[Dict[str, Any]] = (
+        [{"id": ontology_id}] if ontology_id else []
+    )
+
+    def _make_config(ds: Dict[str, Any], include_instructions: bool) -> Dict[str, Any]:
+        cfg: Dict[str, Any] = {"dataSources": [ds]}
+        if include_instructions:
+            cfg["instructions"] = (
+                f"You are a customer analytics assistant. "
+                f"Answer questions about the '{table_name}' table in the Customer360 Lakehouse. "
+                "Provide insights about customer segments, churn risk, lifetime value, and revenue."
+            )
+        if ontologies_config:
+            cfg["ontologies"] = ontologies_config
+        return cfg
+
     payloads = [
-        # Attempt 1: full payload with data source + instructions
+        # Attempt 1: full payload with data source + instructions (+ ontology if available)
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
-            "configuration": {
-                "dataSources": [data_source_primary],
-                "instructions": (
-                    f"You are a customer analytics assistant. "
-                    f"Answer questions about the '{table_name}' table in the Customer360 Lakehouse. "
-                    "Provide insights about customer segments, churn risk, lifetime value, and revenue."
-                ),
-            },
+            "configuration": _make_config(data_source_primary, include_instructions=True),
         },
-        # Attempt 2: data source without instructions
+        # Attempt 2: data source without instructions (+ ontology if available)
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
-            "configuration": {
-                "dataSources": [data_source_primary],
-            },
+            "configuration": _make_config(data_source_primary, include_instructions=False),
         },
-        # Attempt 3: basic linkage, no explicit table selection
+        # Attempt 3: basic linkage, no explicit table selection (+ ontology if available)
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
-            "configuration": {
-                "dataSources": [data_source_basic],
-            },
+            "configuration": _make_config(data_source_basic, include_instructions=False),
         },
     ]
 
@@ -1404,6 +1415,7 @@ def validate_dataagent(
     lakehouse_id: str,
     token: str,
     semantic_model_id: str = "",
+    ontology_id: str = "",
 ) -> bool:
     """
     Post-setup validation for the Data Agent.
@@ -1451,6 +1463,18 @@ def validate_dataagent(
                 for ds in data_sources
             ):
                 print(f"   ✅ Check 2/3: Agent is linked to the correct {ds_type}")
+                if ontology_id:
+                    ontologies = config.get("ontologies") or []
+                    if any(
+                        str(ont.get("id", "")).lower() == ontology_id.lower()
+                        for ont in ontologies
+                    ):
+                        print("   ✅ Check 2/3 (extra): Agent is linked to the Ontology")
+                    else:
+                        print(
+                            "   ⚠️  Check 2/3 (extra): Agent ontology linkage could not be "
+                            "verified (normal for Fabric preview)"
+                        )
             else:
                 print(
                     f"   ❌ Check 2/3: Agent is NOT linked to {ds_type} '{ds_item_id}'. "
@@ -2086,122 +2110,65 @@ def get_default_semantic_model(
     return None
 
 
-# ─── Power BI Report ──────────────────────────────────────────────────────────
+# ─── Fabric IQ Ontology ───────────────────────────────────────────────────────
 
-def _build_report_definition(semantic_model_id: str) -> Dict[str, Any]:
-    """
-    Build a minimal PBIR-Legacy report definition (base64-encoded parts) that
-    creates a blank report with a live connection to the given semantic model.
-
-    The Fabric Reports API (POST /v1/workspaces/{id}/reports) requires a full
-    'definition' object — passing only 'semanticModelId' is not supported.
-
-    Parts produced:
-      definition.pbir  — XMLA-style live connection to the semantic model
-      report.json      — Minimal single-page blank report layout
-    """
-    pbir = {
-        "version": "1.0",
-        "datasetReference": {
-            "byConnection": {
-                "connectionString": None,
-                "pbiServiceModelId": None,
-                "pbiModelVirtualServerName": "sobe_wowvirtualserver",
-                "pbiModelDatabaseName": semantic_model_id,
-                "name": "EntityDataSource",
-                "connectionType": "pbiServiceXmlaStyleLive",
-            }
-        },
-    }
-    report_json = {
-        "config": json.dumps({
-            "version": "5.54",
-            "themeCollection": {
-                "baseTheme": {"name": "CY24SU06", "version": "5.54", "type": 2}
-            },
-        }),
-        "layoutOptimization": 0,
-        "publicCustomVisuals": [],
-        "pods": [],
-        "resourcePackages": [],
-        "sections": [
-            {
-                "name": "ReportSection",
-                "displayName": "Page 1",
-                "filters": "[]",
-                "ordinal": 0,
-                "visualContainers": [],
-                "config": json.dumps({"relationships": []}),
-                "height": 720,
-                "width": 1280,
-            }
-        ],
-    }
-
-    def _b64(obj: Any) -> str:
-        return base64.b64encode(json.dumps(obj).encode()).decode()
-
-    return {
-        "format": "PBIR-Legacy",
-        "parts": [
-            {
-                "path": "definition.pbir",
-                "payload": _b64(pbir),
-                "payloadType": "InlineBase64",
-            },
-            {
-                "path": "report.json",
-                "payload": _b64(report_json),
-                "payloadType": "InlineBase64",
-            },
-        ],
-    }
-
-
-def get_or_create_report(
+def get_or_create_ontology(
     workspace_id: str,
-    report_name: str,
+    ontology_name: str,
     semantic_model_id: str,
     token: str,
 ) -> Optional[str]:
     """
-    Finds or creates a Power BI report in the workspace linked to the given
-    semantic model.  Returns the report item ID, or None on failure.
+    Finds or creates a Fabric IQ Ontology in the workspace linked to the given
+    semantic model.  Returns the ontology item ID, or None on failure.
+
+    The ontology provides a semantic layer over the data model that improves the
+    Data Agent's ability to answer natural-language queries correctly.
     """
-    print(f"📊 Checking for Power BI report: {report_name}")
+    print(f"🧠 Checking for Fabric IQ Ontology: {ontology_name}")
 
-    # ── Check for an existing report ─────────────────────────────────────
-    resp = fabric_request(
-        "GET", f"/workspaces/{workspace_id}/items?type=Report", token
-    )
-    for item in resp.json().get("value", []) or []:
-        if item.get("displayName") == report_name:
-            report_id = item["id"]
-            print(f"✓ Found existing report: {report_name} (ID: {report_id})")
-            return report_id
+    req_headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
-    # ── Create via Fabric Reports API with PBIR-Legacy definition ─────────
-    print(f"📦 Creating Power BI report: {report_name}")
+    # ── Check for an existing ontology ───────────────────────────────────
     try:
-        definition = _build_report_definition(semantic_model_id)
+        list_resp = fabric_request(
+            "GET", f"/workspaces/{workspace_id}/items?type=Ontology", token
+        )
+        for item in list_resp.json().get("value", []) or []:
+            if item.get("displayName") == ontology_name:
+                ontology_id = item["id"]
+                print(f"✓ Found existing Ontology: {ontology_name} (ID: {ontology_id})")
+                return ontology_id
+    except Exception as exc:
+        print(f"   [WARN] Listing ontologies failed (non-fatal): {exc}")
+
+    # ── Create the ontology linked to the semantic model ──────────────────
+    print(f"📦 Creating Fabric IQ Ontology: {ontology_name}")
+    create_payload: Dict[str, Any] = {
+        "displayName": ontology_name,
+        "type": "Ontology",
+        "description": "Customer360 ontology for Fabric IQ Data Agent",
+        "configuration": {
+            "semanticModelId": semantic_model_id,
+            "workspaceId": workspace_id,
+        },
+    }
+    try:
         create_resp = requests.post(
-            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/reports",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "displayName": report_name,
-                "definition": definition,
-            },
+            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
+            headers=req_headers,
+            json=create_payload,
             timeout=60,
         )
 
         if create_resp.status_code in (200, 201):
-            report_id = create_resp.json().get("id")
-            if report_id:
-                print(f"✓ Created report: {report_name} (ID: {report_id})")
-                return report_id
+            ontology_id = create_resp.json().get("id")
+            if ontology_id:
+                print(f"✓ Created Ontology: {ontology_name} (ID: {ontology_id})")
+                return ontology_id
 
         elif create_resp.status_code == 202:
             op_id = (
@@ -2209,60 +2176,28 @@ def get_or_create_report(
                 or create_resp.headers.get("x-ms-operationid")
             )
             if op_id:
-                poll_operation(op_id, token, "report creation")
+                poll_operation(op_id, token, "ontology creation")
             # Re-fetch after async creation
-            resp2 = fabric_request(
-                "GET", f"/workspaces/{workspace_id}/items?type=Report", token
+            list_resp2 = fabric_request(
+                "GET", f"/workspaces/{workspace_id}/items?type=Ontology", token
             )
-            for item in resp2.json().get("value", []) or []:
-                if item.get("displayName") == report_name:
-                    report_id = item["id"]
-                    print(f"✓ Report ready: {report_name} (ID: {report_id})")
-                    return report_id
+            for item in list_resp2.json().get("value", []) or []:
+                if item.get("displayName") == ontology_name:
+                    ontology_id = item["id"]
+                    print(f"✓ Ontology ready: {ontology_name} (ID: {ontology_id})")
+                    return ontology_id
         else:
             print(
-                f"   ⚠️  Report creation returned HTTP {create_resp.status_code}: "
-                f"{create_resp.text[:300]}"
-            )
-            print("   Trying generic Items API as fallback...")
-            # Fallback: create as a generic item (no definition required)
-            item_resp = requests.post(
-                f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={"displayName": report_name, "type": "Report"},
-                timeout=60,
-            )
-            if item_resp.status_code in (200, 201):
-                report_id = item_resp.json().get("id")
-                if report_id:
-                    print(f"✓ Created report via Items API: {report_name} (ID: {report_id})")
-                    return report_id
-            print(
-                f"   ⚠️  Items API fallback also failed ({item_resp.status_code}). "
-                "Create the report manually in the Fabric portal."
+                f"   ⚠️  Ontology creation returned HTTP {create_resp.status_code}: "
+                f"{create_resp.text[:300]}\n"
+                "   The Data Agent will continue without an ontology."
             )
     except Exception as exc:
         print(
-            f"   ⚠️  Report creation failed: {exc}\n"
-            "   Create the report manually in the Fabric portal."
+            f"   ⚠️  Ontology creation failed (non-fatal): {exc}\n"
+            "   The Data Agent will continue without an ontology."
         )
     return None
-
-
-def build_powerbi_embed_url(workspace_id: str, report_id: Optional[str]) -> str:
-    """
-    Returns an embed URL for the Power BI report.
-    autoAuth=true enables SSO when the viewer is already logged into Microsoft.
-    """
-    if not report_id:
-        return ""
-    return (
-        f"https://app.powerbi.com/reportEmbed"
-        f"?reportId={report_id}&groupId={workspace_id}&autoAuth=true"
-    )
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -2271,7 +2206,8 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         description=(
             "Fabric Customer360 setup: workspace → capacity binding → lakehouse "
-            "→ CSV upload → table load → Data Agent → Semantic Model → PBI Report"
+            "→ CSV upload → table load → Semantic Model → Fabric IQ Ontology "
+            "→ Data Agent"
         )
     )
     parser.add_argument("--workspace_name", required=True, help="Fabric workspace display name")
@@ -2292,10 +2228,10 @@ def main(argv=None) -> None:
         help="Skip CSV upload and table load (useful if table already exists)",
     )
     parser.add_argument(
-        "--report_name",
+        "--ontology_name",
         required=False,
-        default="Customer360 Report",
-        help="Display name for the Power BI report to create",
+        default="Customer360 Ontology",
+        help="Display name for the Fabric IQ Ontology to create",
     )
     parser.add_argument(
         "--app_service_principal_id",
@@ -2419,6 +2355,20 @@ def main(argv=None) -> None:
             table_name=args.table_name,
         )
 
+        # ── 5a / 6a. Fabric IQ Ontology ──────────────────────────────────
+        ontology_step = "Step 5a" if args.skip_data_upload else "Step 6a"
+        print(f"\n🧠 {ontology_step}: Fabric IQ Ontology")
+        ontology_id: Optional[str] = None
+        if semantic_model_id:
+            ontology_id = get_or_create_ontology(
+                workspace_id, args.ontology_name, semantic_model_id, fabric_token
+            )
+        else:
+            print(
+                "   ⚠️  Skipping ontology creation — no semantic model available.\n"
+                "   The Data Agent will be created without an ontology."
+            )
+
         # ── 6 / 7. Data Agent ─────────────────────────────────────────────
         next_step = 6 if args.skip_data_upload else 7
         print(f"\n🤖 Step {next_step}: Fabric Data Agent")
@@ -2428,8 +2378,8 @@ def main(argv=None) -> None:
             semantic_model_id=semantic_model_id or "",
         )
 
-        # ── 6a / 7a. Configure Data Agent (link semantic model) ───────────
-        print(f"\n🔗 Step {next_step}a: Configure Data Agent – link data source")
+        # ── 6b / 7b. Configure Data Agent (link semantic model + ontology) ─
+        print(f"\n🔗 Step {next_step}b: Configure Data Agent – link data source and ontology")
         # Re-acquire token before the configure call (previous steps may have
         # taken long enough for the token to be near expiry).
         fabric_token = get_fabric_token()
@@ -2441,31 +2391,23 @@ def main(argv=None) -> None:
             args.table_name,
             fabric_token,
             semantic_model_id=semantic_model_id or "",
+            ontology_id=ontology_id or "",
         )
 
-        # ── 6b / 7b. Publish Data Agent ───────────────────────────────────
-        print(f"\n📢 Step {next_step}b: Publish Data Agent")
+        # ── 6b / 7c. Publish Data Agent ───────────────────────────────────
+        print(f"\n📢 Step {next_step}c: Publish Data Agent")
         publish_dataagent(workspace_id, dataagent_id, args.dataagent_name, fabric_token)
 
-        # ── 6c / 7c. Validate Data Agent ──────────────────────────────────
-        print(f"\n✅ Step {next_step}c: Validate Data Agent")
+        # ── 6c / 7d. Validate Data Agent ──────────────────────────────────
+        print(f"\n✅ Step {next_step}d: Validate Data Agent")
         fabric_token = get_fabric_token()
         validate_dataagent(
             workspace_id, dataagent_id, args.dataagent_name,
             lakehouse_id, fabric_token,
             semantic_model_id=semantic_model_id or "",
+            ontology_id=ontology_id or "",
         )
 
-        # ── 7 / 8. Power BI Report ────────────────────────────────────────
-        next_step += 1
-        print(f"\n📊 Step {next_step}: Power BI Report")
-        report_id: Optional[str] = None
-        if semantic_model_id:
-            report_id = get_or_create_report(
-                workspace_id, args.report_name, semantic_model_id, fabric_token
-            )
-
-        powerbi_embed_url = build_powerbi_embed_url(workspace_id, report_id)
         workspace_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
 
         # ── Summary ───────────────────────────────────────────────────────
@@ -2478,27 +2420,11 @@ def main(argv=None) -> None:
             "table_name":         args.table_name,
             "dataagent_id":       dataagent_id,
             "semantic_model_id":  semantic_model_id or "",
-            "report_id":          report_id or "",
-            "powerbi_embed_url":  powerbi_embed_url,
+            "ontology_id":        ontology_id or "",
             "workspace_url":      workspace_url,
             "capacity_id":        args.capacity_id,
         }
         print(json.dumps(result, indent=2))
-
-        if not powerbi_embed_url:
-            print(
-                "\n💡 Power BI report not created automatically.\n"
-                "   To embed a Power BI report in the frontend:\n"
-                f"   1. Open your Fabric workspace: {workspace_url}\n"
-                f"   2. Open '{args.lakehouse_name}' → click 'New report' in the ribbon\n"
-                "   3. Add visuals (e.g. bar chart: State vs LifetimeValue, table of customers)\n"
-                "   4. Save the report\n"
-                "   5. In the report, click File → Embed report → Website or portal\n"
-                "   6. Copy the embed URL\n"
-                "   7. Re-run this GitHub Actions workflow with:\n"
-                "        powerbi_report_url = <copied URL>\n"
-                "        skip_data_upload = true\n"
-            )
 
         # Emit GitHub Actions outputs if running in CI
         github_output = os.environ.get("GITHUB_OUTPUT")

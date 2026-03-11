@@ -392,7 +392,8 @@ class TestMain:
              patch("fabric_setup.configure_dataagent"), \
              patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
-             patch("fabric_setup.get_default_semantic_model", return_value=None):
+             patch("fabric_setup.get_default_semantic_model", return_value=None), \
+             patch("fabric_setup.get_or_create_ontology", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -418,7 +419,8 @@ class TestMain:
              patch("fabric_setup.configure_dataagent"), \
              patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
-             patch("fabric_setup.get_default_semantic_model", return_value=None):
+             patch("fabric_setup.get_default_semantic_model", return_value=None), \
+             patch("fabric_setup.get_or_create_ontology", return_value=None):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -432,6 +434,104 @@ class TestMain:
         mock_upload.assert_not_called()
         mock_load.assert_not_called()
         mock_sto.assert_not_called()
+
+    def test_ontology_created_when_semantic_model_available(self, tmp_path):
+        """main() should call get_or_create_ontology when semantic_model_id is set."""
+        csv_file = tmp_path / "customer360.csv"
+        csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
+
+        with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
+             patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
+             patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
+             patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
+             patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
+             patch("fabric_setup.load_table_from_file"), \
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent") as mock_configure, \
+             patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.get_or_create_ontology", return_value="ont-id") as mock_ont:
+            fs.main([
+                "--workspace_name", "ws",
+                "--lakehouse_name", "lh",
+                "--csv_path", str(csv_file),
+                "--table_name", "Customer360",
+                "--dataagent_name", "Agent",
+                "--capacity_id", "cap-guid",
+            ])
+
+        mock_ont.assert_called_once_with("ws-id", "Customer360 Ontology", "sm-id", "fab-tok")
+        # configure_dataagent must receive ontology_id
+        _, kwargs = mock_configure.call_args
+        assert kwargs.get("ontology_id") == "ont-id"
+
+    def test_ontology_skipped_when_no_semantic_model(self, tmp_path):
+        """main() must not call get_or_create_ontology when semantic_model_id is None."""
+        csv_file = tmp_path / "customer360.csv"
+        csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
+
+        with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
+             patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
+             patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
+             patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
+             patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
+             patch("fabric_setup.load_table_from_file"), \
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"), \
+             patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
+             patch("fabric_setup.get_default_semantic_model", return_value=None), \
+             patch("fabric_setup.get_or_create_ontology") as mock_ont:
+            fs.main([
+                "--workspace_name", "ws",
+                "--lakehouse_name", "lh",
+                "--csv_path", str(csv_file),
+                "--table_name", "Customer360",
+                "--dataagent_name", "Agent",
+                "--capacity_id", "cap-guid",
+            ])
+
+        mock_ont.assert_not_called()
+
+    def test_result_contains_ontology_id(self, tmp_path, capsys):
+        """Summary JSON must include ontology_id and must NOT include report_id."""
+        csv_file = tmp_path / "customer360.csv"
+        csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
+
+        with patch("fabric_setup.get_fabric_token", return_value="fab-tok"), \
+             patch("fabric_setup.get_storage_token", return_value="sto-tok"), \
+             patch("fabric_setup.get_or_create_workspace", return_value="ws-id"), \
+             patch("fabric_setup.add_workspace_member"), \
+             patch("fabric_setup.get_or_create_lakehouse", return_value="lh-id"), \
+             patch("fabric_setup.upload_csv_to_onelake", return_value="customer360.csv"), \
+             patch("fabric_setup.load_table_from_file"), \
+             patch("fabric_setup.get_or_create_dataagent", return_value="da-id"), \
+             patch("fabric_setup.configure_dataagent"), \
+             patch("fabric_setup.publish_dataagent"), \
+             patch("fabric_setup.validate_dataagent", return_value=True), \
+             patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
+             patch("fabric_setup.get_or_create_ontology", return_value="ont-id"):
+            fs.main([
+                "--workspace_name", "ws",
+                "--lakehouse_name", "lh",
+                "--csv_path", str(csv_file),
+                "--table_name", "Customer360",
+                "--dataagent_name", "Agent",
+                "--capacity_id", "cap-guid",
+            ])
+
+        captured = capsys.readouterr()
+        # Find the JSON block in stdout
+        lines = captured.out.splitlines()
+        json_start = next(i for i, l in enumerate(lines) if l.strip() == "{")
+        json_text = "\n".join(lines[json_start:])
+        result = json.loads(json_text)
+        assert result["ontology_id"] == "ont-id"
+        assert "report_id" not in result
+        assert "powerbi_embed_url" not in result
 
 
 # ─── configure_dataagent ──────────────────────────────────────────────────────
@@ -755,36 +855,72 @@ class TestCreateDirectLakeSemanticModel:
         assert result is None
 
 
-# ─── _build_report_definition ─────────────────────────────────────────────────
+# ─── get_or_create_ontology ───────────────────────────────────────────────────
 
-class TestBuildReportDefinition:
-    def test_report_json_has_no_top_level_id(self):
-        """report.json must NOT include a top-level 'id' field."""
-        defn = fs._build_report_definition("sm-id-1")
-        rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
-        report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
-        assert "id" not in report_obj, (
-            "Top-level 'id' in report.json causes deserialization failures"
-        )
+class TestGetOrCreateOntology:
+    def test_returns_existing_ontology_id(self):
+        """Returns the ID of an existing ontology without creating a new one."""
+        list_resp = _ok_response({"value": [{"displayName": "My Ontology", "id": "ont-1"}]})
+        with patch("requests.request", return_value=list_resp):
+            result = fs.get_or_create_ontology("ws1", "My Ontology", "sm-1", "tok")
+        assert result == "ont-1"
 
-    def test_section_has_no_type_field(self):
-        """Sections must NOT include 'type: 20' (tooltip page type)."""
-        defn = fs._build_report_definition("sm-id-1")
-        rpt_part = next(p for p in defn["parts"] if p["path"] == "report.json")
-        report_obj = json.loads(base64.b64decode(rpt_part["payload"]))
-        section = report_obj["sections"][0]
-        assert "type" not in section, (
-            "Section 'type: 20' is invalid for a regular report page"
-        )
+    def test_creates_ontology_on_201(self):
+        """Creates and returns new ontology ID when not found (HTTP 201)."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-new"}, status=201)
+        with patch("requests.request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp):
+            result = fs.get_or_create_ontology("ws1", "New Ontology", "sm-1", "tok")
+        assert result == "ont-new"
 
-    def test_pbir_references_semantic_model(self):
-        """definition.pbir must reference the provided semantic model ID."""
-        defn = fs._build_report_definition("test-sm-id")
-        pbir_part = next(p for p in defn["parts"] if p["path"] == "definition.pbir")
-        pbir_obj = json.loads(base64.b64decode(pbir_part["payload"]))
-        assert pbir_obj["datasetReference"]["byConnection"]["pbiModelDatabaseName"] == "test-sm-id"
+    def test_creates_ontology_on_200(self):
+        """Creates and returns new ontology ID when not found (HTTP 200)."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-200"}, status=200)
+        with patch("requests.request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp):
+            result = fs.get_or_create_ontology("ws1", "New Ontology", "sm-1", "tok")
+        assert result == "ont-200"
 
-    def test_format_is_pbir_legacy(self):
-        """Definition format must be PBIR-Legacy."""
-        defn = fs._build_report_definition("sm-id")
-        assert defn["format"] == "PBIR-Legacy"
+    def test_returns_none_on_creation_failure(self):
+        """Returns None (non-fatal) when creation returns an error status."""
+        empty_list = _ok_response({"value": []})
+        error_resp = _error_response(500, "Internal Server Error")
+        with patch("requests.request", return_value=empty_list), \
+             patch("requests.post", return_value=error_resp):
+            result = fs.get_or_create_ontology("ws1", "Ontology", "sm-1", "tok")
+        assert result is None
+
+    def test_returns_none_on_exception(self):
+        """Returns None (non-fatal) when creation raises an exception."""
+        empty_list = _ok_response({"value": []})
+        with patch("requests.request", return_value=empty_list), \
+             patch("requests.post", side_effect=Exception("network error")):
+            result = fs.get_or_create_ontology("ws1", "Ontology", "sm-1", "tok")
+        assert result is None
+
+    def test_polls_on_202(self):
+        """Polls operation and re-fetches list when creation returns 202."""
+        empty_list = _ok_response({"value": []})
+        async_resp = MagicMock()
+        async_resp.status_code = 202
+        async_resp.headers = {"x-ms-operation-id": "op-999"}
+        refetch_resp = _ok_response({"value": [{"displayName": "Async Ontology", "id": "ont-async"}]})
+        with patch("requests.request", side_effect=[empty_list, refetch_resp]), \
+             patch("requests.post", return_value=async_resp), \
+             patch("fabric_setup.poll_operation") as mock_poll:
+            result = fs.get_or_create_ontology("ws1", "Async Ontology", "sm-1", "tok")
+        mock_poll.assert_called_once_with("op-999", "tok", "ontology creation")
+        assert result == "ont-async"
+
+    def test_payload_includes_semantic_model_id(self):
+        """Creation payload must reference the provided semantic model ID."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-x"}, status=201)
+        with patch("requests.request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.get_or_create_ontology("ws1", "Ontology", "sm-xyz", "tok")
+        _, kwargs = mock_post.call_args
+        config = kwargs["json"]["configuration"]
+        assert config["semanticModelId"] == "sm-xyz"
