@@ -268,11 +268,15 @@ class FabricClient:
         legacy ``aiskills`` path so agents created under either item-type
         are reachable.
 
-        Returns the response, or None if both URLs fail.
+        Returns the response from the first non-404 URL, or the last received
+        response if all URLs return 404 (so callers always have an accurate
+        HTTP status code rather than a None that logs as "HTTP N/A").
+        Returns None only when all attempts raised a network exception.
         """
         payload: Dict[str, Any] = {
             "messages": [{"role": "user", "content": message}],
         }
+        last_resp: Optional[requests.Response] = None
         for url in (self._openai_compat_url(), self._openai_compat_url_legacy()):
             logger.debug("POST (openai-compat fallback) %s", url)
             try:
@@ -282,6 +286,7 @@ class FabricClient:
                     json=payload,
                     timeout=120,
                 )
+                last_resp = resp
                 if resp.status_code != 404:
                     return resp
                 logger.debug(
@@ -289,7 +294,7 @@ class FabricClient:
                 )
             except Exception as exc:
                 logger.warning("OpenAI-compat fallback exception (%s): %s", url, exc)
-        return None
+        return last_resp
 
     # ─── Extract answer from various response shapes ─────────────────────────
 
@@ -458,21 +463,37 @@ class FabricClient:
                         self.dataagent_id, _QUERY_MAX_RETRIES, self.dataagent_name,
                     )
                     discovered = self._discover_agent_id()
-                    if discovered and discovered != self.dataagent_id:
-                        logger.info(
-                            "Auto-discovery succeeded: new agent ID = %s", discovered
-                        )
-                        self.dataagent_id = discovered
-                        # Reset conversationId — new agent won't know old context
-                        self._conversation_ids.pop(user_id, None)
-                        conversation_id = None
+                    if discovered:
+                        if discovered != self.dataagent_id:
+                            logger.info(
+                                "Auto-discovery found new agent ID %s (was %s). "
+                                "Updating and retrying.",
+                                discovered, self.dataagent_id,
+                            )
+                            self.dataagent_id = discovered
+                            # Reset conversationId — new agent won't know old context
+                            self._conversation_ids.pop(user_id, None)
+                            conversation_id = None
+                        else:
+                            logger.info(
+                                "Auto-discovery confirmed existing agent ID '%s' — "
+                                "agent is listed in the workspace but the query "
+                                "endpoint is still returning 404. "
+                                "Waiting %ds for the agent to become queryable...",
+                                self.dataagent_id, _QUERY_RETRY_WAIT,
+                            )
+                        # Agent confirmed present in workspace — one final retry
+                        # after a brief delay handles the common warm-up scenario
+                        # where the listing API succeeds before the query endpoint
+                        # is ready.
+                        time.sleep(_QUERY_RETRY_WAIT)
                         resp = self._call_primary(message, conversation_id, history)
                         if resp is not None and resp.ok:
                             break
                         if resp is not None:
                             logger.error(
-                                "Discovered agent ID %s also returned %d: %s",
-                                discovered, resp.status_code, resp.text[:300],
+                                "Post-discovery retry for agent %s returned %d: %s",
+                                self.dataagent_id, resp.status_code, resp.text[:300],
                             )
 
             # Non-recoverable on this attempt — break and try fallback
