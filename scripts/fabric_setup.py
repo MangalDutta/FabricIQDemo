@@ -2110,6 +2110,90 @@ def get_default_semantic_model(
     return None
 
 
+# ─── Power BI Report ─────────────────────────────────────────────────────────
+
+def get_or_create_powerbi_report(
+    workspace_id: str,
+    report_name: str,
+    semantic_model_id: str,
+    token: str,
+) -> Optional[str]:
+    """
+    Finds or creates a Power BI Report item in the workspace linked to the
+    given semantic model.  Returns the report item ID, or None on failure.
+
+    The report is created as a Fabric Report item via the Fabric Items API.
+    If a Report with the given display name already exists it is reused.
+    """
+    print(f"📊 Checking for Power BI Report: {report_name}")
+
+    # ── Check for an existing report ─────────────────────────────────────────
+    try:
+        list_resp = fabric_request(
+            "GET", f"/workspaces/{workspace_id}/items?type=Report", token
+        )
+        for item in list_resp.json().get("value", []) or []:
+            if item.get("displayName") == report_name:
+                report_id = item["id"]
+                print(f"✓ Found existing Report: {report_name} (ID: {report_id})")
+                return report_id
+    except Exception as exc:
+        print(f"   [WARN] Listing reports failed (non-fatal): {exc}")
+
+    if not semantic_model_id:
+        print(
+            f"   ⚠️  Cannot create report '{report_name}': no semantic model available.\n"
+            "   Power BI embedding will be skipped."
+        )
+        return None
+
+    # ── Create the report via the Power BI REST API ───────────────────────────
+    # The Fabric Items API does not yet support creating Report items from a
+    # semantic model in one call; use the Power BI REST API instead.
+    print(f"📦 Creating Power BI Report: {report_name}")
+    try:
+        credential = DefaultAzureCredential()
+        pbi_token = credential.get_token(POWERBI_SCOPE).token
+        create_url = f"{POWERBI_BASE_URL}/groups/{workspace_id}/reports"
+        payload = {
+            "name": report_name,
+            "datasetId": semantic_model_id,
+        }
+        resp = requests.post(
+            create_url,
+            headers={
+                "Authorization": f"Bearer {pbi_token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=60,
+        )
+        if resp.ok:
+            report_id = resp.json().get("id")
+            if report_id:
+                print(f"✓ Created Report: {report_name} (ID: {report_id})")
+                return report_id
+        print(
+            f"   ⚠️  Report creation returned HTTP {resp.status_code}: "
+            f"{resp.text[:300]}\n"
+            "   Power BI embedding will be skipped."
+        )
+    except Exception as exc:
+        print(
+            f"   ⚠️  Report creation failed (non-fatal): {exc}\n"
+            "   Power BI embedding will be skipped."
+        )
+    return None
+
+
+def build_powerbi_embed_url(workspace_id: str, report_id: str) -> str:
+    """Returns the standard Power BI embed URL for the given report and workspace."""
+    return (
+        f"https://app.powerbi.com/reportEmbed"
+        f"?reportId={report_id}&groupId={workspace_id}&autoAuth=true"
+    )
+
+
 # ─── Fabric IQ Ontology ───────────────────────────────────────────────────────
 
 def get_or_create_ontology(
@@ -2244,6 +2328,12 @@ def main(argv=None) -> None:
             "Get it via: az webapp identity show --name <app> --resource-group <rg> "
             "--query principalId -o tsv"
         ),
+    )
+    parser.add_argument(
+        "--report_name",
+        required=False,
+        default="Customer360 Report",
+        help="Display name for the Power BI report to create or reuse",
     )
 
     args = parser.parse_args(argv)
@@ -2408,6 +2498,25 @@ def main(argv=None) -> None:
             ontology_id=ontology_id or "",
         )
 
+        # ── Power BI Report (step numbering follows skip_data_upload flag) ──
+        report_step = f"Step {next_step}e"
+        print(f"\n📊 {report_step}: Power BI Report")
+        fabric_token = get_fabric_token()
+        report_id: Optional[str] = None
+        powerbi_embed_url = ""
+        if semantic_model_id:
+            report_id = get_or_create_powerbi_report(
+                workspace_id, args.report_name, semantic_model_id, fabric_token
+            )
+            if report_id:
+                powerbi_embed_url = build_powerbi_embed_url(workspace_id, report_id)
+                print(f"   Embed URL: {powerbi_embed_url}")
+        else:
+            print(
+                "   ⚠️  Skipping report creation — no semantic model available.\n"
+                "   Power BI embedding will be skipped."
+            )
+
         workspace_url = f"https://app.fabric.microsoft.com/groups/{workspace_id}"
 
         # ── Summary ───────────────────────────────────────────────────────
@@ -2423,6 +2532,8 @@ def main(argv=None) -> None:
             "ontology_id":        ontology_id or "",
             "workspace_url":      workspace_url,
             "capacity_id":        args.capacity_id,
+            "report_id":          report_id or "",
+            "powerbi_embed_url":  powerbi_embed_url,
         }
         print(json.dumps(result, indent=2))
 

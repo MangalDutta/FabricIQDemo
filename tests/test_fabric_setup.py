@@ -497,7 +497,7 @@ class TestMain:
         mock_ont.assert_not_called()
 
     def test_result_contains_ontology_id(self, tmp_path, capsys):
-        """Summary JSON must include ontology_id and must NOT include report_id."""
+        """Summary JSON must include ontology_id, report_id, and powerbi_embed_url."""
         csv_file = tmp_path / "customer360.csv"
         csv_file.write_text("CustomerId,FullName\nC1,Alice\n")
 
@@ -513,7 +513,9 @@ class TestMain:
              patch("fabric_setup.publish_dataagent"), \
              patch("fabric_setup.validate_dataagent", return_value=True), \
              patch("fabric_setup.get_default_semantic_model", return_value="sm-id"), \
-             patch("fabric_setup.get_or_create_ontology", return_value="ont-id"):
+             patch("fabric_setup.get_or_create_ontology", return_value="ont-id"), \
+             patch("fabric_setup.get_or_create_powerbi_report", return_value="rpt-id"), \
+             patch("fabric_setup.build_powerbi_embed_url", return_value="https://embed.url"):
             fs.main([
                 "--workspace_name", "ws",
                 "--lakehouse_name", "lh",
@@ -530,8 +532,8 @@ class TestMain:
         json_text = "\n".join(lines[json_start:])
         result = json.loads(json_text)
         assert result["ontology_id"] == "ont-id"
-        assert "report_id" not in result
-        assert "powerbi_embed_url" not in result
+        assert result["report_id"] == "rpt-id"
+        assert result["powerbi_embed_url"] == "https://embed.url"
 
 
 # ─── configure_dataagent ──────────────────────────────────────────────────────
