@@ -841,10 +841,12 @@ def get_or_create_dataagent(
     recommended approach — linking via semantic model makes the data source
     visible in the Fabric portal "Explorer → Data" pane.
 
-    When *ontology_id* is provided the ontology is attached to the agent at
-    creation time via the ``ontologies`` field in ``create_config``.  This is
-    the correct place to attach the ontology — Fabric's internal provisioning
-    order is: Create Ontology → Create Agent (with ontology) → Publish.
+    The data source (``dataSources``) and, when provided, the ontology
+    (``ontologies``) are **always attached at creation time** in the
+    ``configuration`` field of the create payload.  This applies to both the
+    primary dedicated ``dataAgents`` endpoint and the generic ``items``
+    fallback.  The correct provisioning order is:
+        Create Ontology → Create Agent (with dataSources + ontologies) → Publish
 
     KEY DESIGN DECISION — we never delete a Draft agent:
     ─────────────────────────────────────────────────────
@@ -855,7 +857,7 @@ def get_or_create_dataagent(
 
       1. Find by name → return its ID (Draft or Published)
       2. Caller (`configure_dataagent` + `ensure_agent_published`) handles
-         Lakehouse linking and publish attempts
+         any re-linking and publish attempts
       3. If all publish attempts fail, the user publishes once manually;
          from that point on, all future re-deploys find a Published agent
          and touch nothing (no PATCH, no publish call)
@@ -863,6 +865,46 @@ def get_or_create_dataagent(
     Returns the Data Agent item ID.
     """
     print(f"🤖 Checking for Data Agent: {dataagent_name}")
+
+    # ── Build creation payload (shared by both the primary and fallback paths) ─
+    # Data sources and ontology are attached at creation time so that Fabric
+    # follows the correct internal provisioning order:
+    #   Create Ontology → Create Agent (with dataSources + ontologies) → Publish
+    # This avoids the need for a post-creation PATCH to link the data source.
+    data_source: Dict[str, Any]
+    if semantic_model_id:
+        data_source = {
+            "type": "SemanticModel",
+            "workspaceId": workspace_id,
+            "itemId": semantic_model_id,
+        }
+    else:
+        data_source = {
+            "type": "Lakehouse",
+            "workspaceId": workspace_id,
+            "itemId": lakehouse_id,
+        }
+        if table_name:
+            data_source["selectedObjects"] = [
+                {"schema": "dbo", "name": table_name, "objectType": "Table"}
+            ]
+    create_config: Dict[str, Any] = {
+        "dataSources": [data_source],
+    }
+    if ontology_id:
+        create_config["ontologies"] = [{"id": ontology_id}]
+    if table_name:
+        create_config["instructions"] = (
+            f"You are a customer analytics assistant. "
+            f"Answer questions about the '{table_name}' table in the "
+            f"Customer360 Lakehouse. Provide insights about customer "
+            f"segments, churn risk, lifetime value, and revenue."
+        )
+    create_payload: Dict[str, Any] = {
+        "displayName": dataagent_name,
+        "description": "Customer360 conversational analytics agent",
+        "configuration": create_config,
+    }
 
     # ── Try dedicated dataAgents endpoint first ──────────────────────────────
     try:
@@ -878,7 +920,7 @@ def get_or_create_dataagent(
                     if _validate_agent(workspace_id, agent_id, token):
                         # Agent exists — return its ID regardless of Draft/Published state.
                         # configure_dataagent + ensure_agent_published (called by the
-                        # main flow) will handle Lakehouse linking and publishing.
+                        # main flow) will handle any re-linking and publishing.
                         print(f"✓ Found existing Data Agent: {dataagent_name} (ID: {agent_id})")
                         return agent_id
                     # GET itself failed — agent record is truly broken (e.g. workspace
@@ -891,43 +933,6 @@ def get_or_create_dataagent(
                     break  # Fall through to creation below
 
             print(f"📦 Creating Data Agent: {dataagent_name}")
-            # Build data source config — include table selection when
-            # Prefer linking via SemanticModel when available — this makes the
-            # data source visible in the Fabric portal Explorer pane.  Fall
-            # back to Lakehouse if no semantic model ID was provided.
-            if semantic_model_id:
-                data_source: Dict[str, Any] = {
-                    "type": "SemanticModel",
-                    "workspaceId": workspace_id,
-                    "itemId": semantic_model_id,
-                }
-            else:
-                data_source = {
-                    "type": "Lakehouse",
-                    "workspaceId": workspace_id,
-                    "itemId": lakehouse_id,
-                }
-                if table_name:
-                    data_source["selectedObjects"] = [
-                        {"schema": "dbo", "name": table_name, "objectType": "Table"}
-                    ]
-            create_config: Dict[str, Any] = {
-                "dataSources": [data_source],
-            }
-            if ontology_id:
-                create_config["ontologies"] = [{"id": ontology_id}]
-            if table_name:
-                create_config["instructions"] = (
-                    f"You are a customer analytics assistant. "
-                    f"Answer questions about the '{table_name}' table in the "
-                    f"Customer360 Lakehouse. Provide insights about customer "
-                    f"segments, churn risk, lifetime value, and revenue."
-                )
-            create_payload = {
-                "displayName": dataagent_name,
-                "description": "Customer360 conversational analytics agent",
-                "configuration": create_config,
-            }
             create_resp = None
             for _attempt in range(1, NAME_RETRY_MAX + 1):
                 create_resp = requests.post(
@@ -999,17 +1004,20 @@ def get_or_create_dataagent(
             _delete_agent(workspace_id, agent_id, token)
             break  # Exit search loop; fall through to creation below
 
-    # Create generic item (retry on ItemDisplayNameNotAvailableYet)
+    # Create generic item (retry on ItemDisplayNameNotAvailableYet).
+    # The same create_payload (with configuration.dataSources and, when present,
+    # configuration.ontologies) is used here so the data source is attached at
+    # creation time — consistent with the dedicated dataAgents endpoint above.
+    fallback_payload = {
+        "type": "DataAgent",
+        **create_payload,
+    }
     item_resp = None
     for _attempt in range(1, NAME_RETRY_MAX + 1):
         item_resp = requests.post(
             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={
-                "displayName": dataagent_name,
-                "type": "DataAgent",
-                "description": "Customer360 conversational analytics agent",
-            },
+            json=fallback_payload,
             timeout=60,
         )
         if not _is_name_not_available_yet(item_resp):
@@ -1045,9 +1053,7 @@ def get_or_create_dataagent(
             print(
                 f"✓ Data Agent created via Items API: {dataagent_name} (ID: {agent_id})"
             )
-            # Items API does not accept 'configuration' in the create payload,
-            # so the agent has no data source yet.  The caller's
-            # configure_dataagent step will link the Lakehouse table.
+            # Data source and ontology were included in the create payload.
             # Wait for Fabric to finish provisioning before any publish attempt.
             print("   Waiting 20s for Fabric to finish provisioning the agent...")
             time.sleep(20)
