@@ -459,7 +459,9 @@ class TestMain:
                 "--capacity_id", "cap-guid",
             ])
 
-        mock_ont.assert_called_once_with("ws-id", "sm-id", "fab-tok")
+        mock_ont.assert_called_once_with(
+            "ws-id", "Customer360 Ontology", "fab-tok", semantic_model_id="sm-id"
+        )
         # attach_ontology_to_agent must receive the ontology_id as 3rd positional arg
         assert mock_attach.call_args[0][2] == "ont-id"
 
@@ -915,3 +917,93 @@ class TestGetOrCreateOntology:
         _, kwargs = mock_post.call_args
         config = kwargs["json"]["configuration"]
         assert config["semanticModelId"] == "sm-xyz"
+
+
+# ─── create_ontology ──────────────────────────────────────────────────────────
+
+class TestCreateOntology:
+    """Tests for the refactored create_ontology function."""
+
+    def test_sync_201_returns_id(self):
+        """Returns the ontology ID when the API responds with HTTP 201."""
+        resp = _ok_response({"id": "ont-sync"}, status=201)
+        with patch("requests.post", return_value=resp):
+            result = fs.create_ontology("ws1", "My Ontology", "tok")
+        assert result == "ont-sync"
+
+    def test_sync_201_with_semantic_model_in_payload(self):
+        """Payload includes definition.semanticModelId when semantic_model_id is given."""
+        resp = _ok_response({"id": "ont-sm"}, status=201)
+        with patch("requests.post", return_value=resp) as mock_post:
+            fs.create_ontology("ws1", "My Ontology", "tok", semantic_model_id="sm-xyz")
+        _, kwargs = mock_post.call_args
+        assert kwargs["json"]["definition"]["semanticModelId"] == "sm-xyz"
+
+    def test_no_definition_when_no_semantic_model_id(self):
+        """Payload omits definition when semantic_model_id is empty."""
+        resp = _ok_response({"id": "ont-no-sm"}, status=201)
+        with patch("requests.post", return_value=resp) as mock_post:
+            fs.create_ontology("ws1", "My Ontology", "tok")
+        _, kwargs = mock_post.call_args
+        assert "definition" not in kwargs["json"]
+
+    def test_async_202_polls_and_returns_id(self):
+        """Polls operation and re-fetches list when the API responds with HTTP 202."""
+        async_resp = MagicMock()
+        async_resp.status_code = 202
+        async_resp.headers = {"x-ms-operation-id": "op-abc"}
+        async_resp.json.return_value = {}
+
+        list_resp = _ok_response({"value": [{"displayName": "My Ontology", "id": "ont-async"}]})
+
+        with patch("requests.post", return_value=async_resp), \
+             patch("fabric_setup.poll_operation") as mock_poll, \
+             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("time.sleep"):
+            result = fs.create_ontology("ws1", "My Ontology", "tok")
+
+        mock_poll.assert_called_once_with("op-abc", "tok", "ontology creation")
+        assert result == "ont-async"
+
+    def test_async_202_uses_operationid_from_json(self):
+        """Falls back to operationId from JSON body when header is missing."""
+        async_resp = MagicMock()
+        async_resp.status_code = 202
+        async_resp.headers = {}
+        async_resp.json.return_value = {"operationId": "op-json"}
+
+        list_resp = _ok_response({"value": [{"displayName": "Ont", "id": "ont-j"}]})
+
+        with patch("requests.post", return_value=async_resp), \
+             patch("fabric_setup.poll_operation") as mock_poll, \
+             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("time.sleep"):
+            result = fs.create_ontology("ws1", "Ont", "tok")
+
+        mock_poll.assert_called_once_with("op-json", "tok", "ontology creation")
+        assert result == "ont-j"
+
+    def test_raises_on_failure_status(self):
+        """Raises RuntimeError when status code is not 201 or 202."""
+        err_resp = _error_response(500, "Internal Server Error")
+        with patch("requests.post", return_value=err_resp):
+            with pytest.raises(RuntimeError, match="Ontology creation failed"):
+                fs.create_ontology("ws1", "My Ontology", "tok")
+
+    def test_propagation_sleep_called_on_202(self):
+        """time.sleep(40) is called after 202 async provisioning."""
+        async_resp = MagicMock()
+        async_resp.status_code = 202
+        async_resp.headers = {"x-ms-operation-id": "op-sleep"}
+        async_resp.json.return_value = {}
+
+        list_resp = _ok_response({"value": [{"displayName": "Ont", "id": "ont-s"}]})
+
+        sleep_calls = []
+        with patch("requests.post", return_value=async_resp), \
+             patch("fabric_setup.poll_operation"), \
+             patch("fabric_setup.fabric_request", return_value=list_resp), \
+             patch("time.sleep", side_effect=lambda n: sleep_calls.append(n)):
+            fs.create_ontology("ws1", "Ont", "tok")
+
+        assert fs.ONTOLOGY_PROPAGATION_WAIT_SECONDS in sleep_calls

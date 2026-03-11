@@ -45,6 +45,11 @@ POLL_MAX_ATTEMPTS = 60   # 5 min max
 NAME_RETRY_MAX = 10        # up to 10 attempts (~5 min)
 NAME_RETRY_WAIT = 30       # seconds between retries
 
+# ─── Ontology provisioning ────────────────────────────────────────────────────
+# Fabric creates 3 backend resources (Ontology, Graph Model, Ontology Lakehouse)
+# after an async ontology creation.  Allow this long for all of them to appear.
+ONTOLOGY_PROPAGATION_WAIT_SECONDS = 40
+
 
 def get_fabric_token() -> str:
     credential = DefaultAzureCredential()
@@ -2125,32 +2130,86 @@ def get_or_create_ontology(
 
 # ─── Fabric IQ Ontology (simplified) ─────────────────────────────────────────
 
-def create_ontology(workspace_id: str, semantic_model_id: str, token: str) -> str:
-    """Creates a Fabric IQ Ontology linked to the given semantic model."""
+def create_ontology(
+    workspace_id: str,
+    ontology_name: str,
+    token: str,
+    semantic_model_id: str = "",
+) -> str:
+    """Creates a Fabric IQ Ontology, optionally linked to a semantic model.
+
+    Handles both synchronous (HTTP 201) and asynchronous (HTTP 202) provisioning.
+    For the async case the long-running operation is polled until it succeeds and
+    then the ontology ID is fetched by listing workspace ontologies.
+
+    Raises RuntimeError when creation fails.
+    """
     print("🧠 Step: Creating Fabric IQ ontology")
 
-    url = f"https://api.fabric.microsoft.com/v1/workspaces/{workspace_id}/ontologies"
+    url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
-    payload = {
-        "displayName": "Customer360Ontology",
-        "semanticModelId": semantic_model_id,
+    payload: Dict[str, Any] = {
+        "displayName": ontology_name,
+        "description": "Customer360 ontology",
     }
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
+    # Bind to the semantic model when provided so the ontology inherits its
+    # schema and the Data Agent can reason over it more accurately.
+    if semantic_model_id:
+        payload["definition"] = {"semanticModelId": semantic_model_id}
 
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
+    resp = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=60,
+    )
 
-    if r.status_code not in [200, 201]:
-        raise Exception(f"Ontology creation failed with status {r.status_code}: {r.text}")
+    # SUCCESS CASE
+    if resp.status_code == 201:
+        ontology_id = resp.json()["id"]
+        print(f"✓ Ontology created: {ontology_id}")
+        return ontology_id
 
-    ontology_id = r.json()["id"]
+    # ASYNC CASE (most common in Fabric preview)
+    if resp.status_code == 202:
+        operation_id = (
+            resp.headers.get("x-ms-operation-id")
+            or resp.headers.get("x-ms-operationid")
+            or resp.json().get("operationId")
+        )
 
-    print(f"✓ Ontology created: {ontology_id}")
+        print("Ontology provisioning started...")
+        if operation_id:
+            poll_operation(operation_id, token, "ontology creation")
 
-    return ontology_id
+        # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology
+        # Lakehouse) — wait for them to propagate before fetching the ID.
+        print("Waiting for ontology provisioning...")
+        time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
+
+        # Fetch ontology ID after provisioning completes.
+        list_resp = fabric_request(
+            "GET",
+            f"/workspaces/{workspace_id}/items?type=Ontology",
+            token,
+        )
+        for item in list_resp.json().get("value", []):
+            if item.get("displayName") == ontology_name:
+                ontology_id = item["id"]
+                print(f"✓ Ontology ready: {ontology_id}")
+                return ontology_id
+
+        raise RuntimeError(
+            f"Ontology '{ontology_name}' not found after async provisioning completed."
+        )
+
+    raise RuntimeError(
+        f"Ontology creation failed: {resp.status_code} {resp.text}"
+    )
 
 
 # ─── Fabric Data Agent (simplified) ──────────────────────────────────────────
@@ -2367,8 +2426,9 @@ def main(argv=None) -> None:
         print("\n🧠 Step 6: Create Ontology")
         ontology_id = create_ontology(
             workspace_id,
-            semantic_model_id,
+            args.ontology_name,
             fabric_token,
+            semantic_model_id=semantic_model_id or "",
         )
 
         # ── Step 7: Create Data Agent ─────────────────────────────────────
@@ -2381,12 +2441,15 @@ def main(argv=None) -> None:
 
         # ── Step 8: Attach Ontology to Agent ─────────────────────────────
         print("\n🔗 Step 8: Attach Ontology to Agent")
-        attach_ontology_to_agent(
-            workspace_id,
-            dataagent_id,
-            ontology_id,
-            fabric_token,
-        )
+        if ontology_id:
+            attach_ontology_to_agent(
+                workspace_id,
+                dataagent_id,
+                ontology_id,
+                fabric_token,
+            )
+        else:
+            print("   ⚠️  Skipping ontology attachment — ontology_id is empty.")
 
         # ── Step 9: Validate Data Agent ───────────────────────────────────
         print("\n✅ Step 9: Validate Data Agent")
