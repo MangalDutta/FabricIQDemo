@@ -463,6 +463,7 @@ class TestMain:
         mock_ont.assert_called_once_with(
             "ws-id", "Customer360Ontology", "fab-tok",
             semantic_model_id="sm-id",
+            lakehouse_id="lh-id",
             table_name="Customer360",
             columns=[
                 {"name": "CustomerId", "valueType": "String"},
@@ -1354,6 +1355,65 @@ class TestCreateOntologyExistenceCheck:
         assert result == "ont-fallback"
 
 
+# ─── build_customer360_ontology_definition ────────────────────────────────────
+
+class TestBuildCustomer360OntologyDefinition:
+    """Tests for the build_customer360_ontology_definition helper."""
+
+    def test_returns_entities_list(self):
+        """Result has an 'entities' key containing a single-element list."""
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        assert "entities" in result
+        assert len(result["entities"]) == 1
+
+    def test_entity_name_is_customer(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        assert result["entities"][0]["name"] == "Customer"
+
+    def test_entity_key_is_customer_id(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        assert result["entities"][0]["key"] == "CustomerId"
+
+    def test_source_type_is_lakehouse_table(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        assert result["entities"][0]["source"]["type"] == "LakehouseTable"
+
+    def test_source_embeds_workspace_id(self):
+        result = fs.build_customer360_ontology_definition("ws-abc", "lh-1")
+        assert result["entities"][0]["source"]["workspaceId"] == "ws-abc"
+
+    def test_source_embeds_lakehouse_id(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-xyz")
+        assert result["entities"][0]["source"]["itemId"] == "lh-xyz"
+
+    def test_source_table_is_customer360(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        assert result["entities"][0]["source"]["table"] == "Customer360"
+
+    def test_attributes_include_expected_columns(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        attr_names = [a["name"] for a in result["entities"][0]["attributes"]]
+        for col in ("CustomerId", "FullName", "City", "State", "Segment",
+                    "LifetimeValue", "MonthlyRevenue", "ChurnRiskScore"):
+            assert col in attr_names
+
+    def test_decimal_types_for_numeric_columns(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        attrs = {a["name"]: a["type"] for a in result["entities"][0]["attributes"]}
+        assert attrs["LifetimeValue"] == "decimal"
+        assert attrs["MonthlyRevenue"] == "decimal"
+        assert attrs["ChurnRiskScore"] == "decimal"
+
+    def test_string_types_for_text_columns(self):
+        result = fs.build_customer360_ontology_definition("ws-1", "lh-1")
+        attrs = {a["name"]: a["type"] for a in result["entities"][0]["attributes"]}
+        assert attrs["CustomerId"] == "string"
+        assert attrs["FullName"] == "string"
+        assert attrs["City"] == "string"
+        assert attrs["State"] == "string"
+        assert attrs["Segment"] == "string"
+
+
 # ─── build_ontology_definition ────────────────────────────────────────────────
 
 class TestBuildOntologyDefinition:
@@ -1492,6 +1552,45 @@ class TestCreateOntologyWithTableSchema:
         parts = kwargs["json"]["definition"]["parts"]
         decoded = json.loads(base64.b64decode(parts[0]["payload"]))
         assert decoded == {"semanticModelId": "sm-001"}
+
+    def test_lakehouse_entity_binding_when_lakehouse_id_given(self):
+        """definition.json contains a LakehouseTable entity binding when lakehouse_id is provided."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-lh"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology(
+                "ws1", "Customer360Ontology", "tok",
+                lakehouse_id="lh-001",
+            )
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert "entities" in decoded
+        assert len(decoded["entities"]) == 1
+        entity = decoded["entities"][0]
+        assert entity["name"] == "Customer"
+        assert entity["key"] == "CustomerId"
+        assert entity["source"]["type"] == "LakehouseTable"
+        assert entity["source"]["workspaceId"] == "ws1"
+        assert entity["source"]["itemId"] == "lh-001"
+        assert entity["source"]["table"] == "Customer360"
+
+    def test_semantic_model_takes_priority_over_lakehouse_id(self):
+        """When semantic_model_id is provided, it takes priority over lakehouse_id."""
+        empty_list = _ok_response({"value": []})
+        create_resp = _ok_response({"id": "ont-sm-pri"}, status=201)
+        with patch("fabric_setup.fabric_request", return_value=empty_list), \
+             patch("requests.post", return_value=create_resp) as mock_post:
+            fs.create_ontology(
+                "ws1", "Customer360Ontology", "tok",
+                semantic_model_id="sm-002",
+                lakehouse_id="lh-001",
+            )
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"semanticModelId": "sm-002"}
 
     def test_empty_entities_when_no_schema_and_no_semantic_model(self):
         """Falls back to empty entities list when neither semantic_model_id nor columns are given."""
