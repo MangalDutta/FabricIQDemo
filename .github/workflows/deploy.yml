@@ -82,11 +82,6 @@ on:
         required: false
         type: string
         default: 'Customer360Agent'
-      report_name:
-        description: 'Power BI report display name to create or reuse'
-        required: false
-        type: string
-        default: 'Customer360 Report'
 
 jobs:
   deploy:
@@ -308,7 +303,6 @@ jobs:
             --table_name "${{ inputs.table_name }}" \
             --dataagent_name "${{ inputs.dataagent_name }}" \
             --capacity_id "$CAPACITY_ID" \
-            --report_name "${{ inputs.report_name }}" \
             $SKIP_FLAG \
             $MI_FLAG
 
