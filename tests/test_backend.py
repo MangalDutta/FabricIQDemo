@@ -812,6 +812,78 @@ class TestFabricClientChat:
         assert result["answer"] == "Fallback answer"
         assert result["metadata"]["endpoint"] == "openai-compat"
 
+    def test_chat_post_discovery_retry_succeeds_when_same_id_confirmed(self):
+        """When auto-discovery confirms the same agent ID, one extra retry is
+        performed with a delay.  This covers the warm-up scenario where the
+        listing API succeeds before the query endpoint is ready."""
+        client = self._make_client()
+        call_count = {"primary": 0}
+
+        def fake_post(url, **kwargs):
+            mock_resp = MagicMock()
+            if "/query" in url:
+                call_count["primary"] += 1
+                if call_count["primary"] <= 3:
+                    # First 3 retries: still warming up
+                    mock_resp.ok = False
+                    mock_resp.status_code = 404
+                    mock_resp.text = "Entity not found"
+                    mock_resp.json.return_value = {"errorCode": "EntityNotFound"}
+                else:
+                    # Post-discovery retry: agent is now ready
+                    mock_resp.ok = True
+                    mock_resp.status_code = 200
+                    mock_resp.json.return_value = {"answer": "Post-discovery answer"}
+            else:
+                mock_resp.ok = False
+                mock_resp.status_code = 404
+                mock_resp.text = "not found"
+                mock_resp.json.return_value = {}
+            return mock_resp
+
+        def fake_get(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.ok = True
+            # Simulate the listing API returning the same agent ID as the client
+            mock_resp.json.return_value = {
+                "value": [
+                    {
+                        "displayName": "Customer360Agent",
+                        "id": client.dataagent_id,
+                    }
+                ]
+            }
+            return mock_resp
+
+        with (
+            patch("requests.post", side_effect=fake_post),
+            patch("requests.get", side_effect=fake_get),
+            patch("fabric_client.time.sleep", return_value=None),
+        ):
+            result = client.chat("u-disc", "Top 5 customers")
+
+        assert result["answer"] == "Post-discovery answer"
+        # 3 warm-up retries + 1 post-discovery retry
+        assert call_count["primary"] == 4
+
+    def test_fallback_returns_last_404_when_all_urls_fail(self):
+        """_call_openai_compat must return the last 404 response (not None) when
+        every URL returns 404, so callers see the actual HTTP status code."""
+        client = self._make_client()
+
+        def fake_post(url, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.ok = False
+            mock_resp.status_code = 404
+            mock_resp.text = "Entity not found"
+            return mock_resp
+
+        with patch("requests.post", side_effect=fake_post):
+            result = client._call_openai_compat("test message", None)
+
+        assert result is not None, "Expected last 404 response, got None"
+        assert result.status_code == 404
+
 
 # ─── AgentNotReadyError tests ─────────────────────────────────────────────────
 
