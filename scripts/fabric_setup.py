@@ -2185,6 +2185,7 @@ def build_customer360_ontology(
                     {"name": "LifetimeValue", "type": "decimal"},
                     {"name": "MonthlyRevenue", "type": "decimal"},
                     {"name": "ChurnRiskScore", "type": "decimal"},
+                    {"name": "LastPurchaseDate", "type": "datetime"},
                 ],
                 "source": {
                     "type": "LakehouseTable",
@@ -2321,7 +2322,7 @@ def create_ontology(
     else:
         ontology_definition = {"entities": []}
 
-    ontology_def = base64.b64encode(
+    definition_b64 = base64.b64encode(
         json.dumps(ontology_definition).encode()
     ).decode()
 
@@ -2329,8 +2330,7 @@ def create_ontology(
         "parts": [
             {
                 "path": "definition.json",
-                "payload": ontology_def,
-                "payloadType": "InlineBase64",
+                "payload": definition_b64,
             }
         ]
     }
