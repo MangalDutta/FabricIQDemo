@@ -2148,15 +2148,31 @@ def create_ontology(
 
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
-    payload: Dict[str, Any] = {
-        "displayName": ontology_name,
-        "description": "Customer360 ontology",
+    # Build the base64-encoded ontology definition (required by the API).
+    ontology_def = base64.b64encode(
+        json.dumps({"entities": []}).encode()
+    ).decode()
+
+    definition: Dict[str, Any] = {
+        "parts": [
+            {
+                "path": "ontology.json",
+                "payload": ontology_def,
+                "payloadType": "InlineBase64",
+            }
+        ]
     }
 
     # Bind to the semantic model when provided so the ontology inherits its
     # schema and the Data Agent can reason over it more accurately.
     if semantic_model_id:
-        payload["definition"] = {"semanticModelId": semantic_model_id}
+        definition["semanticModelId"] = semantic_model_id
+
+    payload: Dict[str, Any] = {
+        "displayName": ontology_name,
+        "description": "Customer360 ontology",
+        "definition": definition,
+    }
 
     resp = requests.post(
         url,
@@ -2168,8 +2184,8 @@ def create_ontology(
         timeout=60,
     )
 
-    # SUCCESS CASE
-    if resp.status_code == 201:
+    # SUCCESS CASE (sync)
+    if resp.status_code in (200, 201):
         ontology_id = resp.json()["id"]
         print(f"✓ Ontology created: {ontology_id}")
         return ontology_id
@@ -2188,7 +2204,7 @@ def create_ontology(
 
         # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology
         # Lakehouse) — wait for them to propagate before fetching the ID.
-        print("Waiting for ontology provisioning...")
+        print("Waiting for ontology backend resources...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
 
         # Fetch ontology ID after provisioning completes.

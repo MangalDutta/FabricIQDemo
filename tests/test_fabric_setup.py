@@ -939,13 +939,36 @@ class TestCreateOntology:
         _, kwargs = mock_post.call_args
         assert kwargs["json"]["definition"]["semanticModelId"] == "sm-xyz"
 
-    def test_no_definition_when_no_semantic_model_id(self):
-        """Payload omits definition when semantic_model_id is empty."""
+    def test_no_semantic_model_id_in_definition_when_not_provided(self):
+        """Payload always includes definition.parts; semanticModelId absent when not provided."""
         resp = _ok_response({"id": "ont-no-sm"}, status=201)
         with patch("requests.post", return_value=resp) as mock_post:
             fs.create_ontology("ws1", "My Ontology", "tok")
         _, kwargs = mock_post.call_args
-        assert "definition" not in kwargs["json"]
+        defn = kwargs["json"]["definition"]
+        assert "parts" in defn
+        assert "semanticModelId" not in defn
+
+    def test_sync_200_returns_id(self):
+        """Returns the ontology ID when the API responds with HTTP 200."""
+        resp = _ok_response({"id": "ont-200"}, status=200)
+        with patch("requests.post", return_value=resp):
+            result = fs.create_ontology("ws1", "My Ontology", "tok")
+        assert result == "ont-200"
+
+    def test_payload_always_includes_parts(self):
+        """Payload definition.parts contains ontology.json regardless of semantic_model_id."""
+        resp = _ok_response({"id": "ont-parts"}, status=201)
+        with patch("requests.post", return_value=resp) as mock_post:
+            fs.create_ontology("ws1", "My Ontology", "tok")
+        _, kwargs = mock_post.call_args
+        parts = kwargs["json"]["definition"]["parts"]
+        assert len(parts) == 1
+        assert parts[0]["path"] == "ontology.json"
+        assert parts[0]["payloadType"] == "InlineBase64"
+        # Payload is base64 of {"entities": []}
+        decoded = json.loads(base64.b64decode(parts[0]["payload"]))
+        assert decoded == {"entities": []}
 
     def test_async_202_polls_and_returns_id(self):
         """Polls operation and re-fetches list when the API responds with HTTP 202."""
