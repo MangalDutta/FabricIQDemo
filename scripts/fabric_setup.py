@@ -2331,6 +2331,7 @@ def create_ontology(
             {
                 "path": "definition.json",
                 "payload": definition_b64,
+                "payloadType": "InlineBase64",
             }
         ]
     }
