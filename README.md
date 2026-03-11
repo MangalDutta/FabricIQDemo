@@ -38,23 +38,6 @@ Choose the deployment option that fits your scenario:
 
 > With default naming inputs, resource names will be: `acr-cust360dev`, `app-cust360-backend-dev`, `app-cust360-frontend-dev`, etc. Change `base_name` and `environment` to customise them.
 
-### Infra Only — Azure Portal Parameters (Deploy to Azure)
-
-Click the **Deploy to Azure** button above and the Azure Portal will open with a custom deployment form. Fill in the following parameters:
-
-| Parameter | Required | Default | Description |
-|---|---|---|---|
-| **Subscription** | ✅ | — | Select your Azure subscription |
-| **Resource Group** | ✅ | — | Select an existing resource group or create a new one |
-| `baseName` | — | `cust360` | Prefix for all resource names (ACR, App Service, etc.) |
-| `env` | — | `dev` | Environment suffix (e.g. `dev`, `test`, `prod`) |
-| `location` | — | Resource group location | Azure region for all resources |
-| `enablePrivateEndpoints` | — | `false` | Set to `true` to deploy VNet + private endpoints for ACR |
-| `fabricSku` | — | *(blank)* | Set to `F2`–`F2048` or `Trial` to provision a new Fabric capacity. Leave blank to skip. |
-| `fabricCapacityName` | — | *(auto-generated)* | Override the auto-generated Fabric capacity name (lowercase alphanumeric, 3-63 chars) |
-| `fabricCapacityAdmins` | ⚠️ | `[]` | **Required when `fabricSku` is set** — JSON array of admin UPNs, e.g. `["admin@contoso.com"]` |
-
-> After the infra-only deployment, run the **Full stack** workflow with `skip_data_upload=false` to build and deploy the Docker images and set up the Fabric workspace.
 
 ### CLI Deployment (alternative)
 
@@ -389,6 +372,7 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Backend `/health` returns `{"status":"healthy"}`
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] (Optional) Power BI report embedded in right panel
+
 
 
 
