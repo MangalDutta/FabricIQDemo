@@ -1143,21 +1143,17 @@ def configure_dataagent(
 
             # In Fabric preview, GET /dataAgents/{id} often omits the
             # 'configuration' field — so has_config_data is frequently False.
-            # We must distinguish between:
-            #   (a) Agent already properly configured → skip PATCH
-            #   (b) Newly created agent with no data source → must PATCH
-            # Use the /query endpoint as the authoritative check: if the
-            # agent is queryable it is already linked and published.
+            # We ALWAYS attempt the configure step in this case so the
+            # top-level `semanticModelId` PATCH (which is the only approach that
+            # makes the data source visible in the Fabric portal) is applied.
+            # The "skip if queryable" fast-path is intentionally removed because:
+            #   - An agent can be queryable yet have no visible data source
+            #   - The top-level semanticModelId PATCH is idempotent
+            #   - ensure_agent_published is called after the PATCH to re-publish
             if not has_config_data:
-                if _is_agent_queryable(workspace_id, agent_id, token):
-                    print(
-                        "   API did not return 'configuration' but agent IS queryable — "
-                        "skipping PATCH to avoid Draft-state regression."
-                    )
-                    return
                 print(
-                    "   API did not return 'configuration' and agent is NOT queryable — "
-                    f"proceeding with PATCH to link {ds_type}."
+                    "   API did not return 'configuration' — "
+                    f"proceeding with PATCH to link {ds_type} (semanticModelId)."
                 )
         else:
             print(
@@ -1205,19 +1201,34 @@ def configure_dataagent(
         return cfg
 
     payloads = [
-        # Attempt 1: full payload with data source + instructions
+        # Attempt 1: top-level semanticModelId — same field used at creation time.
+        # This is the ONLY approach verified to make the data source visible in the
+        # Fabric portal "Explorer → Data" pane.  Nested configuration.dataSources
+        # returns HTTP 200/204 but is silently ignored by the Fabric preview API.
+        *(
+            [
+                {
+                    "displayName": agent_name,
+                    "description": "Customer360 conversational analytics agent",
+                    "semanticModelId": semantic_model_id,
+                }
+            ]
+            if semantic_model_id
+            else []
+        ),
+        # Attempt 2: full nested payload with data source + instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": _make_config(data_source_primary, include_instructions=True),
         },
-        # Attempt 2: data source without instructions
+        # Attempt 3: data source without instructions
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
             "configuration": _make_config(data_source_primary, include_instructions=False),
         },
-        # Attempt 3: basic linkage, no explicit table selection
+        # Attempt 4: basic linkage, no explicit table selection
         {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
@@ -1233,8 +1244,10 @@ def configure_dataagent(
     for method in ("PATCH", "PUT"):
         for i, payload in enumerate(payloads, 1):
             attempt += 1
+            top_sm = payload.get("semanticModelId", "")
             ds_keys = list(payload.get("configuration", {}).get("dataSources", [{}])[0].keys())
-            print(f"   Configure attempt {attempt} ({method}): {ds_keys}")
+            label = f"semanticModelId={top_sm}" if top_sm else str(ds_keys)
+            print(f"   Configure attempt {attempt} ({method}): {label}")
             try:
                 resp = requests.request(
                     method,
@@ -2380,7 +2393,11 @@ def create_ontology(
     """
     print("🧠 Step: Creating Fabric IQ ontology")
 
-    # Check whether the ontology already exists to avoid failures on reruns.
+    # Always delete-then-recreate to ensure the correct multi-part entity
+    # definition (EntityTypes + DataBindings) is applied.  An ontology that
+    # was previously created with the broken {"semanticModelId": "..."} payload
+    # will appear in the list with no entity types — returning that stale ID
+    # would leave the Data Agent without semantic context.
     try:
         list_resp = fabric_request(
             "GET",
@@ -2389,9 +2406,38 @@ def create_ontology(
         )
         for item in list_resp.json().get("value", []):
             if item.get("displayName") == ontology_name:
-                ontology_id = item["id"]
-                print(f"✓ Found existing ontology: {ontology_name} (ID: {ontology_id})")
-                return ontology_id
+                old_id = item["id"]
+                print(
+                    f"   Found existing ontology '{ontology_name}' (ID: {old_id}) — "
+                    "deleting to rebuild with correct entity definition..."
+                )
+                try:
+                    del_resp = requests.delete(
+                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies/{old_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=30,
+                    )
+                    if del_resp.ok or del_resp.status_code == 404:
+                        print("   ✓ Existing ontology deleted. Waiting 30s for Fabric cleanup...")
+                        time.sleep(30)
+                    else:
+                        # Fallback: try the items endpoint
+                        del_resp2 = requests.delete(
+                            f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items/{old_id}",
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=30,
+                        )
+                        if del_resp2.ok or del_resp2.status_code == 404:
+                            print("   ✓ Existing ontology deleted (items endpoint). Waiting 30s...")
+                            time.sleep(30)
+                        else:
+                            print(
+                                f"   [WARN] Could not delete existing ontology "
+                                f"(HTTP {del_resp2.status_code}) — will attempt creation anyway."
+                            )
+                except Exception as del_exc:
+                    print(f"   [WARN] Delete attempt failed (non-fatal): {del_exc}")
+                break  # Only one ontology with this name can exist
     except Exception as exc:
         print(f"   [WARN] Could not list ontologies (non-fatal): {exc}. Proceeding to attempt creation.")
 
