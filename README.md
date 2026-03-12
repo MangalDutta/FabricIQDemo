@@ -400,20 +400,6 @@ No passwords stored. No API keys in config files. Production-ready.
 
 ---
 
-## Estimated Monthly Cost
-
-| Resource | Cost |
-|---|---|
-| App Service B1 (x2) | ~$30/month |
-| ACR Basic | ~$5/month |
-| Log Analytics | ~$2/month |
-| Fabric F2 capacity | ~$262/month (pay-as-you-go, pause when not in use) |
-| **Total** | **~$300/month** |
-
-> Pause the Fabric capacity when not demoing to reduce cost to ~$37/month.
-
----
-
 ## Troubleshooting
 
 ### "No response received." in the chat
@@ -456,4 +442,5 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] Notebooks appear in the Fabric workspace (5 notebooks)
 - [ ] (Optional) Power BI report embedded in right panel
+
 
