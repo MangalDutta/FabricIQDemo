@@ -83,7 +83,7 @@ customer360.csv
 │  Lakehouse (Customer360Lakehouse)                     │
 │     └── Customer360 table (Delta)                     │
 │              │                                        │
-│              ├──► Semantic Model (auto-created)        │
+│              ├──► Semantic Model (Manually create AUtomatic Report for Demo purpose with 1-click)        │
 │              │         │                              │
 │              │         ├──► Power BI Report ─────────────► Embedded in React App
 │              │         │                              │
@@ -456,3 +456,4 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] Notebooks appear in the Fabric workspace (5 notebooks)
 - [ ] (Optional) Power BI report embedded in right panel
+
