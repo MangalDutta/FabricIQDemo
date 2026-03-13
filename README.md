@@ -7,14 +7,33 @@
 
 ## One-Click Deploy
 
+> ⚠️ **Important — the Deploy to Azure button requires the repository to be public.**
+> The Azure Portal fetches `azuredeploy.json` directly from the raw GitHub URL. If the repository is private, the portal will show a "Template not found" error for all users. Make sure your repo is set to **Public** in GitHub → Settings → General before sharing this button.
+
 | Button | What it deploys | Requirements |
 |---|---|---|
-| [![Deploy to Azure](https://img.shields.io/badge/🚀%20Deploy%20to%20Azure-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Full stack** — Azure infra + Fabric resources + Notebooks + Docker apps (~20 min) | Azure subscription with **Contributor** access |
-| [![Run on GitHub Actions](https://img.shields.io/badge/▶%20Run%20on%20GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — same, with live logs and re-run support | Repo write access + GitHub OIDC configured |
+| [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricIQDemo%2Fmaster%2Fazuredeploy.json) | **Full stack** — Azure infra + Fabric resources + Notebooks + Docker apps (~20 min) | Azure subscription with **Contributor** access |
+| [![Run on GitHub Actions](https://img.shields.io/badge/▶%20Run%20on%20GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/MangalDutta/FabricIQDemo/actions/workflows/deploy.yml) | **Full stack** — same, with live logs and re-run support | Repo write access + GitHub OIDC configured |
 
 > **Deploy to Azure** → Azure Portal opens → Select **Subscription** + **Resource Group** → Fill parameters → **Review + create** → **Create**.
 >
 > **Run on GitHub Actions** → Actions page opens → click **Run workflow** → fill 6 inputs → **Run workflow**.
+>
+> **If the Deploy to Azure button shows "Template not found":** Your GitHub repository is either private or the `azuredeploy.json` file has not been pushed yet. See [Requirements](#requirements-for-the-deploy-to-azure-button) below.
+
+### Requirements for the Deploy to Azure Button
+
+For the **Deploy to Azure** button to work for **anyone** (not just you), three things must be true:
+
+1. **Repository must be Public** — Azure Portal fetches the ARM template directly from `raw.githubusercontent.com`. GitHub returns 404 for private repos, and Azure Portal shows "Template not found". Go to: GitHub → your repo → **Settings** → **General** → scroll to **Danger Zone** → **Change repository visibility** → **Public**.
+
+2. **`azuredeploy.json` must be committed and pushed to `master`** — The button links to the `master` branch of `MangalDutta/FabricIQDemo`. If you ever rename or change the default branch, update the button URL to match.
+
+3. **The person clicking only needs an Azure subscription** — They do **not** need access to your GitHub repository. Azure Portal fetches the public template URL and deploys directly into their own subscription.
+
+> **Alternative — host the template on Azure Blob Storage:** If you need the repo to remain private, upload `azuredeploy.json` to a public Azure Blob Storage container and update the button URL to point to the blob's public URL instead of GitHub.
+
+---
 
 ### Required Inputs (6 required, 10 optional)
 
