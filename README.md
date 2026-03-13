@@ -9,9 +9,12 @@
 
 | Button | What it deploys | Requirements |
 |---|---|---|
-| [![Deploy Customer360](https://img.shields.io/badge/🚀%20Deploy%20Customer360-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — Azure infra + Fabric resources + Notebooks + Docker apps (~10 min) | GitHub OIDC configured (see Prerequisites) |
+| [![Deploy to Azure](https://img.shields.io/badge/🚀%20Deploy%20to%20Azure-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FMangalDutta%2FFabricCustomer360Accelerator%2Fmaster%2Fazuredeploy.json) | **Full stack** — Azure infra + Fabric resources + Notebooks + Docker apps (~20 min) | Azure subscription with **Contributor** access |
+| [![Run on GitHub Actions](https://img.shields.io/badge/▶%20Run%20on%20GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/MangalDutta/FabricCustomer360Accelerator/actions/workflows/deploy.yml) | **Full stack** — same, with live logs and re-run support | Repo write access + GitHub OIDC configured |
 
-> **Full stack** button → **"Run workflow"** → Fill in the inputs → **"Run workflow"** again.
+> **Deploy to Azure** → Azure Portal opens → Select **Subscription** + **Resource Group** → Fill parameters → **Review + create** → **Create**.
+>
+> **Run on GitHub Actions** → Actions page opens → click **Run workflow** → fill 6 inputs → **Run workflow**.
 
 ### Required Inputs (6 required, 10 optional)
 
@@ -442,5 +445,6 @@ Check GitHub → Settings → Secrets and variables → Actions → ensure feder
 - [ ] Chat responds to "Top 5 customers by LifetimeValue"
 - [ ] Notebooks appear in the Fabric workspace (5 notebooks)
 - [ ] (Optional) Power BI report embedded in right panel
+
 
 
