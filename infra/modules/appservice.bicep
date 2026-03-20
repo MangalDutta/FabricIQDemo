@@ -44,8 +44,11 @@ resource backendApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     siteConfig: {
       linuxFxVersion: 'DOCKER|nginx:alpine'
-      // Use managed identity to pull from ACR (no admin credentials needed)
-      acrUseManagedIdentityCreds: true
+      // ACR credentials are configured post-deploy by the workflow using admin keys.
+      // acrUseManagedIdentityCreds is intentionally omitted: setting it at creation
+      // time causes an ARM internal server error because the AcrPull role assignment
+      // (which depends on the app's principalId) does not yet exist when ARM tries
+      // to validate the managed-identity → ACR connection.
       appSettings: [
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
@@ -80,8 +83,7 @@ resource frontendApp 'Microsoft.Web/sites@2023-12-01' = {
     serverFarmId: appServicePlan.id
     siteConfig: {
       linuxFxVersion: 'DOCKER|nginx:alpine'
-      // Use managed identity to pull from ACR (no admin credentials needed)
-      acrUseManagedIdentityCreds: true
+      // See comment on backendApp — acrUseManagedIdentityCreds omitted intentionally.
       appSettings: [
         {
           name: 'WEBSITES_ENABLE_APP_SERVICE_STORAGE'
@@ -101,29 +103,13 @@ resource frontendApp 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
-  name: acrName
-}
-
-resource backendAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(backendApp.id, acr.id, 'AcrPull')
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: backendApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-resource frontendAcrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(frontendApp.id, acr.id, 'AcrPull')
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')
-    principalId: frontendApp.identity.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+// AcrPull role assignments are intentionally removed.
+// The workflow configures ACR access post-deploy using admin credentials
+// (--docker-registry-server-user / --docker-registry-server-password in
+// az webapp config container set), which is correct for a Basic SKU ACR.
+// Managed-identity-based pulls (acrUseManagedIdentityCreds) require the
+// role assignment to exist before ARM validates the App Service, creating
+// an unresolvable circular dependency that produces an ARM internal server error.
 
 output backendAppName string = backendApp.name
 output frontendAppName string = frontendApp.name
