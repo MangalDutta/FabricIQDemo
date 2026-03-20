@@ -3263,10 +3263,15 @@ def main(argv=None) -> None:
             table_name=args.table_name,
             semantic_model_id=semantic_model_id or "",
             ontology_id=ontology_id or "",
+            lakehouse_name=args.lakehouse_name,
+            semantic_model_name=args.lakehouse_name,
+            ontology_name=args.ontology_name,
         )
 
         # ── Step 8: Configure agent datasource ───────────────────────────
-        # Ontology is NOT included here — it was already attached at creation.
+        # updateDefinition rewrites the full definition, so ALL datasources
+        # (lakehouse, semantic model, AND ontology) must be passed here.
+        # Omitting any one of them would silently erase it from the agent.
         print("\n⚙️  Step 8: Configure agent datasource")
         configure_dataagent(
             workspace_id,
@@ -3276,6 +3281,10 @@ def main(argv=None) -> None:
             args.table_name,
             fabric_token,
             semantic_model_id=semantic_model_id or "",
+            ontology_id=ontology_id or "",
+            lakehouse_name=args.lakehouse_name,
+            semantic_model_name=args.lakehouse_name,
+            ontology_name=args.ontology_name,
         )
 
         # ── Step 9: Validate Data Agent ───────────────────────────────────
