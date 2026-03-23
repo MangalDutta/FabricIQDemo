@@ -2411,15 +2411,24 @@ def _build_ontology_parts(
     lakehouse_id: str,
     table_name: str,
     columns: Optional[List[Dict[str, str]]] = None,
+    ontology_name: str = "Customer360Ontology",
 ) -> List[Dict[str, Any]]:
     """Builds the multi-part ontology definition using Fabric's EntityTypes format.
 
-    This is the format that actually populates entities and data bindings in the
-    Fabric Ontology UI.  Each entity type gets its own ``EntityTypes/{id}/definition.json``
-    and each data binding gets ``EntityTypes/{id}/DataBindings/{id}.json``.
+    The definition always includes:
+      .platform                                    — required item metadata (type + displayName)
+      definition.json                              — graph model content with nodeTypes + edgeTypes
+                                                     (required by GraphSchemaDiscovery+ModelContent
+                                                      so the Data Agent can load the graph schema)
+      EntityTypes/{id}/definition.json             — entity type definition
+      EntityTypes/{id}/DataBindings/{id}.json      — data binding to Lakehouse table
 
-    This follows the same pattern used in the Trucking Ontology Workshop reference
-    notebooks which has been verified to work end-to-end.
+    ROOT CAUSE OF "missing required properties: nodeTypes, edgeTypes":
+    When the Data Agent's GraphSchemaDiscovery service reads the ontology it
+    deserialises definition.json as ModelContent.  An empty {} causes a hard
+    deserialization failure.  Populating definition.json with the actual
+    nodeTypes / edgeTypes (derived from the entity type) resolves this.
+    The IDs in definition.json match those in EntityTypes/ for consistency.
     """
     import random as _rng
     _rng.seed(42)
@@ -2453,15 +2462,11 @@ def _build_ontology_parts(
     key_column     = "CustomerId"
     display_column = "FullName"
 
-    # Start with the required empty root definition part.
-    parts: List[Dict[str, Any]] = [
-        {"path": "definition.json", "payload": _to_b64({}), "payloadType": "InlineBase64"},
-    ]
-
+    # ── Generate stable IDs ─────────────────────────────────────────────────
     entity_type_id = _gen_id()
     property_ids: Dict[str, str] = {}
 
-    # Build properties from columns.
+    # Build properties from columns (shared by EntityType and nodeTypes schema).
     properties = []
     for col in columns:
         prop_id = _gen_id()
@@ -2477,7 +2482,42 @@ def _build_ontology_parts(
     key_prop_id     = property_ids.get(key_column, properties[0]["id"])
     display_prop_id = property_ids.get(display_column, key_prop_id)
 
-    # Entity type definition.
+    # ── definition.json — graph model content ───────────────────────────────
+    # GraphSchemaDiscovery+ModelContent REQUIRES nodeTypes and edgeTypes.
+    # Use the same entity_type_id / property IDs as the EntityTypes folder
+    # so both representations are consistent.
+    node_type_schema = {
+        "id": entity_type_id,
+        "name": entity_name,
+        "namespace": "usertypes",
+        "namespaceType": "Custom",
+        "properties": [
+            {"id": property_ids[col["name"]], "name": col["name"], "valueType": col["valueType"]}
+            for col in columns
+            if col["name"] in property_ids
+        ],
+    }
+    definition_content = {
+        "nodeTypes": [node_type_schema],
+        "edgeTypes": [],
+    }
+
+    # ── Assemble parts ──────────────────────────────────────────────────────
+    # .platform is required per the Fabric Ontology REST API spec.
+    parts: List[Dict[str, Any]] = [
+        {
+            "path": ".platform",
+            "payload": _to_b64({"metadata": {"type": "Ontology", "displayName": ontology_name}}),
+            "payloadType": "InlineBase64",
+        },
+        {
+            "path": "definition.json",
+            "payload": _to_b64(definition_content),
+            "payloadType": "InlineBase64",
+        },
+    ]
+
+    # ── EntityTypes/{id}/definition.json ────────────────────────────────────
     entity_def = {
         "id": entity_type_id,
         "namespace": "usertypes",
@@ -2496,7 +2536,7 @@ def _build_ontology_parts(
         "payloadType": "InlineBase64",
     })
 
-    # Data binding (NonTimeSeries → Lakehouse table).
+    # ── EntityTypes/{id}/DataBindings/{id}.json ─────────────────────────────
     binding_id = str(uuid.uuid4())
     data_binding = {
         "id": binding_id,
@@ -2514,6 +2554,7 @@ def _build_ontology_parts(
                 "workspaceId": workspace_id,
                 "itemId": lakehouse_id,
                 "sourceTableName": table_name,
+                "sourceSchema": "dbo",
             },
         },
     }
@@ -2598,18 +2639,21 @@ def create_ontology(
 
     url = f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/ontologies"
 
-    # Always build the full multi-part definition with entity types and data
-    # bindings.  The simpler {"semanticModelId": "..."} format creates an empty
-    # ontology shell — Fabric does NOT auto-derive entities from a semantic
-    # model reference.
+    # Always build the full multi-part definition with:
+    #   .platform              — required item metadata (type = Ontology, displayName)
+    #   definition.json        — graph ModelContent with nodeTypes + edgeTypes
+    #                            (fixes: GraphSchemaDiscovery+ModelContent missing
+    #                             required properties 'nodeTypes', 'edgeTypes')
+    #   EntityTypes/{id}/…     — entity type + data binding to Lakehouse table
     parts = _build_ontology_parts(
         workspace_id=workspace_id,
         lakehouse_id=lakehouse_id,
         table_name=table_name or "Customer360",
         columns=columns,
+        ontology_name=ontology_name,
     )
 
-    print(f"   Ontology definition: {len(parts)} parts (entity types + data bindings)")
+    print(f"   Ontology definition: {len(parts)} parts (.platform + graph schema + entity types + data bindings)")
 
     payload: Dict[str, Any] = {
         "displayName": ontology_name,
@@ -2631,6 +2675,11 @@ def create_ontology(
     if resp.status_code in (200, 201):
         ontology_id = resp.json()["id"]
         print(f"✓ Ontology created: {ontology_id}")
+        # Wait for Fabric to index the entity types and build the graph model.
+        # Without this wait the Data Agent's GraphSchemaDiscovery may read
+        # the ontology before indexing completes and get an empty schema.
+        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for Fabric to index entity types...")
+        time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
         return ontology_id
 
     # ASYNC CASE (most common in Fabric preview)
