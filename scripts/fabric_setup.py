@@ -905,45 +905,12 @@ def _build_agent_definition_parts(
         "$schema": "2.1.0",
     }))
 
-    # ── Semantic Model datasource (preferred) ────────────────────────────────
-    if semantic_model_id:
-        sm_name = sanitize_name(semantic_model_name) if semantic_model_name else "Customer360SM"
-        ds_key = f"semantic_model-{sm_name}"
-        ds_json = {
-            "$schema": "1.0.0",
-            "type": "semantic_model",
-            "artifactId": semantic_model_id,
-            "displayName": sm_name,
-            "workspaceId": workspace_id,
-        }
-        fs_json = {"$schema": "1.0.0", "fewShots": []}
-        parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
-        parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
-        if published:
-            parts.append(_part(f"Files/Config/published/{ds_key}/datasource.json", ds_json))
-            parts.append(_part(f"Files/Config/published/{ds_key}/fewshots.json", fs_json))
-        datasource_keys.append(ds_key)
-
-    # ── Lakehouse datasource (fallback when no semantic model available) ──────
-    elif lakehouse_id:
-        lh_name = sanitize_name(lakehouse_name) if lakehouse_name else "Customer360Lakehouse"
-        ds_key = f"lakehouse-{lh_name}"
-        ds_json = {
-            "$schema": "1.0.0",
-            "type": "lakehouse",
-            "artifactId": lakehouse_id,
-            "displayName": lh_name,
-            "workspaceId": workspace_id,
-        }
-        fs_json = {"$schema": "1.0.0", "fewShots": []}
-        parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
-        parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
-        if published:
-            parts.append(_part(f"Files/Config/published/{ds_key}/datasource.json", ds_json))
-            parts.append(_part(f"Files/Config/published/{ds_key}/fewshots.json", fs_json))
-        datasource_keys.append(ds_key)
-
-    # ── Ontology (graph) datasource ──────────────────────────────────────────
+    # ── Ontology (graph) datasource — PRIMARY ────────────────────────────────
+    # Ontology is the preferred data source.  When an ontology_id is provided
+    # the agent is wired exclusively to the graph/GQL engine so that natural-
+    # language queries are routed through the Fabric IQ Ontology rather than
+    # the raw Lakehouse SQL endpoint.
+    #
     # The `elements` array is REQUIRED — without it Fabric does not register
     # the graph node types and the GQL engine cannot resolve label expressions
     # such as (node_Customer:`Customer`), causing the "label does not match
@@ -965,6 +932,44 @@ def _build_agent_definition_parts(
                     "is_selected": True,
                 }
             ],
+        }
+        fs_json = {"$schema": "1.0.0", "fewShots": []}
+        parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
+        parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
+        if published:
+            parts.append(_part(f"Files/Config/published/{ds_key}/datasource.json", ds_json))
+            parts.append(_part(f"Files/Config/published/{ds_key}/fewshots.json", fs_json))
+        datasource_keys.append(ds_key)
+
+    # ── Semantic Model datasource (fallback when no ontology available) ───────
+    elif semantic_model_id:
+        sm_name = sanitize_name(semantic_model_name) if semantic_model_name else "Customer360SM"
+        ds_key = f"semantic_model-{sm_name}"
+        ds_json = {
+            "$schema": "1.0.0",
+            "type": "semantic_model",
+            "artifactId": semantic_model_id,
+            "displayName": sm_name,
+            "workspaceId": workspace_id,
+        }
+        fs_json = {"$schema": "1.0.0", "fewShots": []}
+        parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
+        parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
+        if published:
+            parts.append(_part(f"Files/Config/published/{ds_key}/datasource.json", ds_json))
+            parts.append(_part(f"Files/Config/published/{ds_key}/fewshots.json", fs_json))
+        datasource_keys.append(ds_key)
+
+    # ── Lakehouse datasource (fallback when no ontology or semantic model) ────
+    elif lakehouse_id:
+        lh_name = sanitize_name(lakehouse_name) if lakehouse_name else "Customer360Lakehouse"
+        ds_key = f"lakehouse-{lh_name}"
+        ds_json = {
+            "$schema": "1.0.0",
+            "type": "lakehouse",
+            "artifactId": lakehouse_id,
+            "displayName": lh_name,
+            "workspaceId": workspace_id,
         }
         fs_json = {"$schema": "1.0.0", "fewShots": []}
         parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
@@ -1256,8 +1261,13 @@ def configure_dataagent(
     Falls back gracefully (non-fatal) if ``updateDefinition`` is not yet
     available on the tenant, printing clear manual-action instructions.
     """
-    ds_item_id = semantic_model_id or lakehouse_id
-    ds_type = "SemanticModel" if semantic_model_id else "Lakehouse"
+    # Ontology is the primary data source; fall back to SM or Lakehouse only
+    # when no ontology is available.
+    ds_item_id = ontology_id or semantic_model_id or lakehouse_id
+    ds_type = (
+        "Ontology" if ontology_id
+        else ("SemanticModel" if semantic_model_id else "Lakehouse")
+    )
     print(f"   Configuring Data Agent '{agent_name}' via updateDefinition "
           f"→ {ds_type} '{ds_item_id}' ...")
 
@@ -1337,9 +1347,9 @@ def configure_dataagent(
               "   Attempting legacy PATCH fallback...")
 
     # ── Step 3: Legacy PATCH fallback (only if updateDefinition unavailable) ──
-    # Tries the top-level semanticModelId field (undocumented preview field).
-    # This is kept as a safety net for tenants that don't yet have updateDefinition.
-    if semantic_model_id:
+    # Ontology is the primary data source; only attempt PATCH with SM id when
+    # no ontology is available (undocumented preview field, kept as safety net).
+    if semantic_model_id and not ontology_id:
         patch_payload = {
             "displayName": agent_name,
             "description": "Customer360 conversational analytics agent",
@@ -1367,7 +1377,7 @@ def configure_dataagent(
         f"   ⚠️  Data Agent configuration could not be completed via API.\n"
         f"   You can link the data source manually in the Fabric portal:\n"
         f"   https://app.fabric.microsoft.com/groups/{workspace_id}\n"
-        f"   → Open '{agent_name}' → Add data source → {ds_type}"
+        f"   → Open '{agent_name}' → Add data source → {ds_type} (ID: {ds_item_id})"
     )
 
 
@@ -1593,8 +1603,13 @@ def validate_dataagent(
     Returns True if all checks pass, False otherwise.
     Prints detailed status for each check.
     """
-    ds_item_id = semantic_model_id or lakehouse_id
-    ds_type = "SemanticModel" if semantic_model_id else "Lakehouse"
+    # Ontology is the primary data source; fall back to SM or Lakehouse only
+    # when no ontology is available.
+    ds_item_id = ontology_id or semantic_model_id or lakehouse_id
+    ds_type = (
+        "Ontology" if ontology_id
+        else ("SemanticModel" if semantic_model_id else "Lakehouse")
+    )
     print(f"\n   🔍 Validating Data Agent '{agent_name}' (ID: {agent_id})...")
     all_ok = True
 
@@ -1627,19 +1642,7 @@ def validate_dataagent(
                 str(ds.get("itemId", "")).lower() == ds_item_id.lower()
                 for ds in data_sources
             ):
-                print(f"   ✅ Check 2/3: Agent is linked to the correct {ds_type}")
-                if ontology_id:
-                    ontologies = config.get("ontologies") or []
-                    if any(
-                        str(ont.get("id", "")).lower() == ontology_id.lower()
-                        for ont in ontologies
-                    ):
-                        print("   ✅ Check 2/3 (extra): Agent is linked to the Ontology")
-                    else:
-                        print(
-                            "   ⚠️  Check 2/3 (extra): Agent ontology linkage could not be "
-                            "verified (normal for Fabric preview)"
-                        )
+                print(f"   ✅ Check 2/3: Agent is linked to the correct {ds_type} (ID: {ds_item_id})")
             else:
                 print(
                     f"   ❌ Check 2/3: Agent is NOT linked to {ds_type} '{ds_item_id}'. "
