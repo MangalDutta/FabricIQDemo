@@ -26,7 +26,7 @@ import re
 import sys
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
@@ -871,6 +871,7 @@ def _build_agent_definition_parts(
     lakehouse_name: str = "",
     ontology_id: str = "",
     ontology_name: str = "",
+    entity_type_id: str = "",
     published: bool = False,
 ) -> List[Dict[str, Any]]:
     """
@@ -918,6 +919,12 @@ def _build_agent_definition_parts(
     if ontology_id:
         ont_name = sanitize_name(ontology_name) if ontology_name else "Customer360Ontology"
         ds_key = f"graph-{ont_name}"
+        # elements[].id MUST match the entity_type_id used when the Ontology was
+        # created (a positive 64-bit integer string).  GraphSchemaDiscovery uses
+        # this ID to look up the EntityType definition at query time; a mismatch
+        # (e.g. a random UUID) causes it to return an empty schema which surfaces
+        # as "missing required properties: nodeTypes, edgeTypes".
+        _elem_id = entity_type_id if entity_type_id else str(uuid.uuid4())
         ds_json = {
             "$schema": "1.0.0",
             "type": "graph",
@@ -926,13 +933,14 @@ def _build_agent_definition_parts(
             "workspaceId": workspace_id,
             "elements": [
                 {
-                    "id": str(uuid.uuid4()),
+                    "id": _elem_id,
                     "display_name": "Customer",
                     "type": "graph.nodeType",
                     "is_selected": True,
                 }
             ],
         }
+        print(f"   Graph datasource element id: {_elem_id}")
         fs_json = {"$schema": "1.0.0", "fewShots": []}
         parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
         parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
@@ -1013,6 +1021,7 @@ def get_or_create_dataagent(
     lakehouse_name: str = "",
     semantic_model_name: str = "",
     ontology_name: str = "",
+    entity_type_id: str = "",
 ) -> str:
     """
     Finds an existing Fabric Data Agent by name, or creates one if absent.
@@ -1061,6 +1070,7 @@ def get_or_create_dataagent(
         lakehouse_name=lakehouse_name,
         ontology_id=ontology_id,
         ontology_name=ontology_name,
+        entity_type_id=entity_type_id,
         published=True,
     )
     create_payload: Dict[str, Any] = {
@@ -1242,6 +1252,7 @@ def configure_dataagent(
     lakehouse_name: str = "",
     semantic_model_name: str = "",
     ontology_name: str = "",
+    entity_type_id: str = "",
 ) -> None:
     """
     Updates the Data Agent definition to link it to its data sources and
@@ -1311,6 +1322,7 @@ def configure_dataagent(
         lakehouse_name=lakehouse_name,
         ontology_id=ontology_id,
         ontology_name=ontology_name,
+        entity_type_id=entity_type_id,
         published=True,
     )
 
@@ -2564,7 +2576,7 @@ def _build_ontology_parts(
         "payloadType": "InlineBase64",
     })
 
-    return parts
+    return parts, entity_type_id
 
 
 def create_ontology(
@@ -2575,7 +2587,7 @@ def create_ontology(
     lakehouse_id: str = "",
     table_name: str = "",
     columns: Optional[List[Dict[str, str]]] = None,
-) -> str:
+) -> Tuple[str, str]:
     """Creates a Fabric IQ Ontology with a Customer entity bound to the Lakehouse table.
 
     Uses the multi-part definition format (EntityTypes + DataBindings) that
@@ -2645,13 +2657,14 @@ def create_ontology(
     #                            (fixes: GraphSchemaDiscovery+ModelContent missing
     #                             required properties 'nodeTypes', 'edgeTypes')
     #   EntityTypes/{id}/…     — entity type + data binding to Lakehouse table
-    parts = _build_ontology_parts(
+    parts, entity_type_id = _build_ontology_parts(
         workspace_id=workspace_id,
         lakehouse_id=lakehouse_id,
         table_name=table_name or "Customer360",
         columns=columns,
         ontology_name=ontology_name,
     )
+    print(f"   Ontology entity_type_id: {entity_type_id} (will be used as agent elements[].id)")
 
     print(f"   Ontology definition: {len(parts)} parts (.platform + graph schema + entity types + data bindings)")
 
@@ -2680,7 +2693,7 @@ def create_ontology(
         # the ontology before indexing completes and get an empty schema.
         print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for Fabric to index entity types...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
-        return ontology_id
+        return ontology_id, entity_type_id
 
     # ASYNC CASE (most common in Fabric preview)
     if resp.status_code == 202:
@@ -2709,7 +2722,7 @@ def create_ontology(
             if item.get("displayName") == ontology_name:
                 ontology_id = item["id"]
                 print(f"✓ Ontology ready: {ontology_id}")
-                return ontology_id
+                return ontology_id, entity_type_id
 
         raise RuntimeError(
             f"Ontology '{ontology_name}' not found after async provisioning completed."
@@ -3293,7 +3306,7 @@ def main(argv=None) -> None:
         csv_columns: List[Dict[str, str]] = []
         if not args.skip_data_upload and os.path.isfile(args.csv_path):
             csv_columns = infer_columns_from_csv(args.csv_path)
-        ontology_id = create_ontology(
+        ontology_id, entity_type_id = create_ontology(
             workspace_id,
             args.ontology_name,
             fabric_token,
@@ -3302,6 +3315,7 @@ def main(argv=None) -> None:
             table_name=args.table_name,
             columns=csv_columns or None,
         )
+        print(f"   entity_type_id={entity_type_id} will be wired into agent elements[]")
 
         # ── Step 7: Create Data Agent (with ontology attached at creation) ─
         # The ontology is included in the create_config so Fabric follows the
@@ -3318,6 +3332,7 @@ def main(argv=None) -> None:
             lakehouse_name=args.lakehouse_name,
             semantic_model_name=args.lakehouse_name,
             ontology_name=args.ontology_name,
+            entity_type_id=entity_type_id or "",
         )
 
         # ── Step 8: Configure agent datasource ───────────────────────────
@@ -3337,6 +3352,7 @@ def main(argv=None) -> None:
             lakehouse_name=args.lakehouse_name,
             semantic_model_name=args.lakehouse_name,
             ontology_name=args.ontology_name,
+            entity_type_id=entity_type_id or "",
         )
 
         # ── Step 9: Validate Data Agent ───────────────────────────────────
