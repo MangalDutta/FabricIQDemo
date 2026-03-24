@@ -51,7 +51,7 @@ NAME_RETRY_WAIT = 30       # seconds between retries
 # after an async ontology creation.  Allow this long for all of them to appear.
 # The Fabric IQ tutorial explicitly warns: "If you see errors, wait a few minutes
 # to give the agent more time to initialize."  120s is the minimum safe window.
-ONTOLOGY_PROPAGATION_WAIT_SECONDS = 120
+ONTOLOGY_PROPAGATION_WAIT_SECONDS = 300
 
 
 def sanitize_name(name: str) -> str:
@@ -889,10 +889,14 @@ def _build_agent_definition_parts(
     parts and ``publish_info.json`` — which is the official mechanism for
     marking an agent as Published without a separate publish endpoint.
 
-    Datasource key naming convention used by Fabric:
-      - Semantic model → ``semantic_model-{displayName}``
-      - Lakehouse      → ``lakehouse-{displayName}``
-      - Ontology       → ``graph-{displayName}``
+    Datasource key naming convention used by Fabric (from source-control docs):
+      - Semantic model → ``semantic-model-{displayName}``
+      - Lakehouse      → ``lakehouse-tables-{displayName}``
+      - Ontology       → ``ontology-{displayName}``   ← NOT "graph-"
+    The folder prefix determines how the Data Agent service routes schema
+    discovery.  Using "graph-" causes GraphSchemaDiscovery to fail with
+    "missing nodeTypes/edgeTypes" because the service cannot locate the
+    ontology's compiled graph model via the wrong namespace path.
     """
     parts: List[Dict[str, Any]] = []
     datasource_keys: List[str] = []
@@ -934,7 +938,12 @@ def _build_agent_definition_parts(
     # the Customer node type as a selected source in the Agent Explorer pane.
     if ontology_id:
         ont_name = sanitize_name(ontology_name) if ontology_name else "Customer360Ontology"
-        ds_key = f"graph-{ont_name}"
+        # CRITICAL: folder prefix MUST be "ontology-" for ontology data sources.
+        # Official Fabric source-control docs explicitly state:
+        #   "Ontology data sources: Folder names start with 'ontology-'"
+        # Using "graph-" silently routes to the wrong schema discovery path and
+        # causes: "missing required properties including: 'nodeTypes', 'edgeTypes'"
+        ds_key = f"ontology-{ont_name}"
         ds_json = {
             "$schema": _DS_SCHEMA,
             "type": "graph",
@@ -2600,11 +2609,12 @@ def create_ontology(
     """
     print("🧠 Step: Creating Fabric IQ ontology")
 
-    # Always delete-then-recreate to ensure the correct multi-part entity
-    # definition (EntityTypes + DataBindings) is applied.  An ontology that
-    # was previously created with the broken {"semanticModelId": "..."} payload
-    # will appear in the list with no entity types — returning that stale ID
-    # would leave the Data Agent without semantic context.
+    # Smart reuse: if an existing ontology already has EntityTypes (either
+    # created via the UI or by a previous successful script run), reuse it.
+    # Only delete-and-recreate when the ontology is missing EntityTypes
+    # (e.g., leftover from the old broken {"semanticModelId": "..."} payload).
+    # Destroying a working ontology forces a new 5-minute compilation wait
+    # and is the primary reason we see persistent GraphSchemaDiscovery errors.
     try:
         list_resp = fabric_request(
             "GET",
@@ -2614,9 +2624,47 @@ def create_ontology(
         for item in list_resp.json().get("value", []):
             if item.get("displayName") == ontology_name:
                 old_id = item["id"]
+                # Check if the existing ontology already has EntityTypes defined.
+                has_entity_types = False
+                try:
+                    gd_resp = requests.post(
+                        f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+                        f"/ontologies/{old_id}/getDefinition",
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=30,
+                    )
+                    if gd_resp.status_code == 200:
+                        existing_parts = (
+                            gd_resp.json().get("definition", {}).get("parts", [])
+                        )
+                        et_parts = [
+                            p for p in existing_parts
+                            if "EntityTypes" in p.get("path", "")
+                        ]
+                        if et_parts:
+                            has_entity_types = True
+                            print(
+                                f"   Found existing ontology '{ontology_name}' (ID: {old_id}) "
+                                f"with {len(et_parts)} EntityType part(s) — reusing."
+                            )
+                except Exception as gd_exc:
+                    print(f"   [WARN] Could not read existing ontology definition: {gd_exc}")
+
+                if has_entity_types:
+                    # Reuse existing compiled ontology — skip creation entirely.
+                    _, entity_type_id = _build_ontology_parts(
+                        workspace_id=workspace_id,
+                        lakehouse_id=lakehouse_id,
+                        table_name=table_name or "Customer360",
+                        columns=columns,
+                        ontology_name=ontology_name,
+                    )
+                    return old_id, entity_type_id
+
+                # No EntityTypes → old broken format; delete and recreate.
                 print(
-                    f"   Found existing ontology '{ontology_name}' (ID: {old_id}) — "
-                    "deleting to rebuild with correct entity definition..."
+                    f"   Existing ontology '{ontology_name}' (ID: {old_id}) has no "
+                    "EntityTypes — deleting to rebuild with correct definition..."
                 )
                 try:
                     del_resp = requests.delete(
@@ -2625,21 +2673,20 @@ def create_ontology(
                         timeout=30,
                     )
                     if del_resp.ok or del_resp.status_code == 404:
-                        print("   ✓ Existing ontology deleted. Waiting 30s for Fabric cleanup...")
+                        print("   ✓ Stale ontology deleted. Waiting 30s for Fabric cleanup...")
                         time.sleep(30)
                     else:
-                        # Fallback: try the items endpoint
                         del_resp2 = requests.delete(
                             f"{FABRIC_BASE_URL}/workspaces/{workspace_id}/items/{old_id}",
                             headers={"Authorization": f"Bearer {token}"},
                             timeout=30,
                         )
                         if del_resp2.ok or del_resp2.status_code == 404:
-                            print("   ✓ Existing ontology deleted (items endpoint). Waiting 30s...")
+                            print("   ✓ Stale ontology deleted (items endpoint). Waiting 30s...")
                             time.sleep(30)
                         else:
                             print(
-                                f"   [WARN] Could not delete existing ontology "
+                                f"   [WARN] Could not delete stale ontology "
                                 f"(HTTP {del_resp2.status_code}) — will attempt creation anyway."
                             )
                 except Exception as del_exc:
@@ -2663,7 +2710,7 @@ def create_ontology(
         columns=columns,
         ontology_name=ontology_name,
     )
-    print(f"   Ontology entity_type_id: {entity_type_id} (will be used as agent elements[].id)")
+    print(f"   Ontology entity_type_id: {entity_type_id}")
 
     print(f"   Ontology definition: {len(parts)} parts (.platform + graph schema + entity types + data bindings)")
 
@@ -2725,10 +2772,11 @@ def create_ontology(
     if resp.status_code in (200, 201):
         ontology_id = resp.json()["id"]
         print(f"✓ Ontology created: {ontology_id}")
-        # Wait for Fabric to compile EntityTypes into the graph model.
+        # Wait for Fabric to compile EntityTypes into the internal graph model.
         # Fabric IQ tutorial warns: "if you see errors, wait a few minutes."
-        # 120s initial wait + up to 3 min polling = ~5 min max.
-        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for initial EntityType compilation...")
+        # 300s (5 min) initial wait + up to 3 min polling gives Fabric enough
+        # time to finish the async compilation before the Data Agent is created.
+        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for graph model compilation...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
         _verify_entity_types(ontology_id)
         return ontology_id, entity_type_id
@@ -2747,7 +2795,7 @@ def create_ontology(
 
         # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology
         # Lakehouse) — wait for them to propagate before fetching the ID.
-        print("Waiting for ontology backend provisioning...")
+        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for graph model compilation...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
 
         # Fetch ontology ID after provisioning completes.
