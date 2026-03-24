@@ -49,7 +49,9 @@ NAME_RETRY_WAIT = 30       # seconds between retries
 # ─── Ontology provisioning ────────────────────────────────────────────────────
 # Fabric creates 3 backend resources (Ontology, Graph Model, Ontology Lakehouse)
 # after an async ontology creation.  Allow this long for all of them to appear.
-ONTOLOGY_PROPAGATION_WAIT_SECONDS = 40
+# The Fabric IQ tutorial explicitly warns: "If you see errors, wait a few minutes
+# to give the agent more time to initialize."  120s is the minimum safe window.
+ONTOLOGY_PROPAGATION_WAIT_SECONDS = 120
 
 
 def sanitize_name(name: str) -> str:
@@ -898,12 +900,22 @@ def _build_agent_definition_parts(
     def _part(path: str, data: Any) -> Dict[str, Any]:
         return {"path": path, "payload": _b64json(data), "payloadType": "InlineBase64"}
 
+    # ── Schema URL constants (official Fabric JSON schema registry) ─────────
+    # All $schema values must use the full developer.microsoft.com URL, not
+    # just a short version string.  Using the full URL ensures Fabric's
+    # validation pipeline recognises and processes each part correctly.
+    _DA_SCHEMA  = "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/dataAgent/2.1.0/schema.json"
+    _DS_SCHEMA  = "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/dataSource/1.0.0/schema.json"
+    _FS_SCHEMA  = "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/fewShots/1.0.0/schema.json"
+    _SC_SCHEMA  = "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/stageConfiguration/1.0.0/schema.json"
+    _PI_SCHEMA  = "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/publishInfo/1.0.0/schema.json"
+
     # ── data_agent.json — top-level schema version marker ────────────────────
     # Per the Fabric REST API docs, data_agent.json must only contain the
     # $schema version identifier.  Agent instructions belong in stage_config.json
     # (aiInstructions field), NOT here.
     parts.append(_part("Files/Config/data_agent.json", {
-        "$schema": "2.1.0",
+        "$schema": _DA_SCHEMA,
     }))
 
     # ── Ontology (graph) datasource — PRIMARY ────────────────────────────────
@@ -912,36 +924,33 @@ def _build_agent_definition_parts(
     # language queries are routed through the Fabric IQ Ontology rather than
     # the raw Lakehouse SQL endpoint.
     #
-    # The `elements` array is REQUIRED — without it Fabric does not register
-    # the graph node types and the GQL engine cannot resolve label expressions
-    # such as (node_Customer:`Customer`), causing the "label does not match
-    # any node type" error at query time.
+    # DataSourceElement.id (per DataAgent definition spec) is string(uuid):
+    #   a RANDOM UUID that identifies this element entry in the datasource config.
+    # It is NOT the entity_type_id (which is a 64-bit integer used in the
+    # ontology folder path).  GraphSchemaDiscovery reads all entity types from
+    # the ontology by artifactId; the elements array is a UI selection filter.
+    #
+    # elements[] with the entity type display_name enables the UI to show
+    # the Customer node type as a selected source in the Agent Explorer pane.
     if ontology_id:
         ont_name = sanitize_name(ontology_name) if ontology_name else "Customer360Ontology"
         ds_key = f"graph-{ont_name}"
-        # elements[].id MUST match the entity_type_id used when the Ontology was
-        # created (a positive 64-bit integer string).  GraphSchemaDiscovery uses
-        # this ID to look up the EntityType definition at query time; a mismatch
-        # (e.g. a random UUID) causes it to return an empty schema which surfaces
-        # as "missing required properties: nodeTypes, edgeTypes".
-        _elem_id = entity_type_id if entity_type_id else str(uuid.uuid4())
         ds_json = {
-            "$schema": "1.0.0",
+            "$schema": _DS_SCHEMA,
             "type": "graph",
             "artifactId": ontology_id,
             "displayName": ont_name,
             "workspaceId": workspace_id,
             "elements": [
                 {
-                    "id": _elem_id,
+                    "id": str(uuid.uuid4()),  # random UUID per DataSourceElement spec
                     "display_name": "Customer",
                     "type": "graph.nodeType",
                     "is_selected": True,
                 }
             ],
         }
-        print(f"   Graph datasource element id: {_elem_id}")
-        fs_json = {"$schema": "1.0.0", "fewShots": []}
+        fs_json = {"$schema": _FS_SCHEMA, "fewShots": []}
         parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
         parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
         if published:
@@ -954,13 +963,13 @@ def _build_agent_definition_parts(
         sm_name = sanitize_name(semantic_model_name) if semantic_model_name else "Customer360SM"
         ds_key = f"semantic_model-{sm_name}"
         ds_json = {
-            "$schema": "1.0.0",
+            "$schema": _DS_SCHEMA,
             "type": "semantic_model",
             "artifactId": semantic_model_id,
             "displayName": sm_name,
             "workspaceId": workspace_id,
         }
-        fs_json = {"$schema": "1.0.0", "fewShots": []}
+        fs_json = {"$schema": _FS_SCHEMA, "fewShots": []}
         parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
         parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
         if published:
@@ -973,13 +982,13 @@ def _build_agent_definition_parts(
         lh_name = sanitize_name(lakehouse_name) if lakehouse_name else "Customer360Lakehouse"
         ds_key = f"lakehouse-{lh_name}"
         ds_json = {
-            "$schema": "1.0.0",
+            "$schema": _DS_SCHEMA,
             "type": "lakehouse",
             "artifactId": lakehouse_id,
             "displayName": lh_name,
             "workspaceId": workspace_id,
         }
-        fs_json = {"$schema": "1.0.0", "fewShots": []}
+        fs_json = {"$schema": _FS_SCHEMA, "fewShots": []}
         parts.append(_part(f"Files/Config/draft/{ds_key}/datasource.json", ds_json))
         parts.append(_part(f"Files/Config/draft/{ds_key}/fewshots.json", fs_json))
         if published:
@@ -992,7 +1001,7 @@ def _build_agent_definition_parts(
     # The dataSources list is NOT a valid field — it caused Fabric to reject
     # the definition silently and produce an unconfigured agent.
     stage_cfg = {
-        "$schema": "1.0.0",
+        "$schema": _SC_SCHEMA,
         "aiInstructions": AGENT_INSTRUCTIONS,
     }
     parts.append(_part("Files/Config/draft/stage_config.json", stage_cfg))
@@ -1001,7 +1010,7 @@ def _build_agent_definition_parts(
     if published:
         parts.append(_part("Files/Config/published/stage_config.json", stage_cfg))
         parts.append(_part("Files/Config/publish_info.json", {
-            "$schema": "1.0.0",
+            "$schema": _PI_SCHEMA,
             "description": "Customer360Agent — published at creation",
         }))
 
@@ -2494,27 +2503,17 @@ def _build_ontology_parts(
     key_prop_id     = property_ids.get(key_column, properties[0]["id"])
     display_prop_id = property_ids.get(display_column, key_prop_id)
 
-    # ── definition.json — graph model content ───────────────────────────────
-    # GraphSchemaDiscovery+ModelContent REQUIRES nodeTypes and edgeTypes.
-    # Use the same entity_type_id / property IDs as the EntityTypes folder
-    # so both representations are consistent.
-    node_type_schema = {
-        "id": entity_type_id,
-        "name": entity_name,
-        "namespace": "usertypes",
-        "namespaceType": "Custom",
-        "properties": [
-            {"id": property_ids[col["name"]], "name": col["name"], "valueType": col["valueType"]}
-            for col in columns
-            if col["name"] in property_ids
-        ],
-    }
-    definition_content = {
-        "nodeTypes": [node_type_schema],
-        "edgeTypes": [],
-    }
-
     # ── Assemble parts ──────────────────────────────────────────────────────
+    # IMPORTANT: Per the official Fabric Ontology REST API specification:
+    #   "DefinitionDetails: Empty definition. The file name is definition.json.
+    #    It is an empty definition."  →  definition.json MUST always be {}.
+    #
+    # Fabric builds the internal graph model (ModelContent / nodeTypes+edgeTypes)
+    # from the EntityTypes/* folder contents ASYNCHRONOUSLY after creation.
+    # The GraphSchemaDiscovery service reads that compiled model, not definition.json.
+    # Sending non-empty content in definition.json previously PREVENTED Fabric from
+    # compiling the EntityTypes correctly, which is why ModelContent stayed {}.
+    #
     # .platform is required per the Fabric Ontology REST API spec.
     parts: List[Dict[str, Any]] = [
         {
@@ -2524,7 +2523,7 @@ def _build_ontology_parts(
         },
         {
             "path": "definition.json",
-            "payload": _to_b64(definition_content),
+            "payload": _to_b64({}),  # MUST be {} per spec — Fabric computes schema from EntityTypes
             "payloadType": "InlineBase64",
         },
     ]
@@ -2684,15 +2683,54 @@ def create_ontology(
         timeout=60,
     )
 
+    def _verify_entity_types(ont_id: str) -> bool:
+        """Poll getDefinition until EntityTypes parts appear (max 3 min).
+
+        Returns True if at least one EntityTypes part is confirmed stored.
+        Returns False if timed-out or the endpoint is unavailable.
+        The error we're solving is Fabric needing extra time after ontology
+        creation to compile the graph model from the EntityTypes.  The tutorial
+        explicitly says 'wait a few minutes' if queries fail after creation.
+        """
+        max_attempts = 6  # check every 30s, up to 3 minutes total
+        for attempt in range(1, max_attempts + 1):
+            try:
+                def_resp = requests.post(
+                    f"{FABRIC_BASE_URL}/workspaces/{workspace_id}"
+                    f"/ontologies/{ont_id}/getDefinition",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                )
+                if def_resp.status_code == 200:
+                    parts_list = def_resp.json().get("definition", {}).get("parts", [])
+                    et_parts = [p for p in parts_list if "EntityTypes" in p.get("path", "")]
+                    if et_parts:
+                        print(f"   ✓ EntityTypes confirmed in getDefinition "
+                              f"({len(et_parts)} part(s)) after {attempt * 30}s")
+                        return True
+                    print(f"   [{attempt}/{max_attempts}] EntityTypes not yet in getDefinition "
+                          f"(found {len(parts_list)} parts total) — waiting 30s...")
+                else:
+                    print(f"   [{attempt}/{max_attempts}] getDefinition HTTP "
+                          f"{def_resp.status_code} — waiting 30s...")
+            except Exception as exc:
+                print(f"   [{attempt}/{max_attempts}] getDefinition check failed: {exc}")
+            if attempt < max_attempts:
+                time.sleep(30)
+        print("   ⚠️  EntityTypes not confirmed after 3 minutes. "
+              "Proceeding — the graph model may still be compiling.")
+        return False
+
     # SUCCESS CASE (sync)
     if resp.status_code in (200, 201):
         ontology_id = resp.json()["id"]
         print(f"✓ Ontology created: {ontology_id}")
-        # Wait for Fabric to index the entity types and build the graph model.
-        # Without this wait the Data Agent's GraphSchemaDiscovery may read
-        # the ontology before indexing completes and get an empty schema.
-        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for Fabric to index entity types...")
+        # Wait for Fabric to compile EntityTypes into the graph model.
+        # Fabric IQ tutorial warns: "if you see errors, wait a few minutes."
+        # 120s initial wait + up to 3 min polling = ~5 min max.
+        print(f"   Waiting {ONTOLOGY_PROPAGATION_WAIT_SECONDS}s for initial EntityType compilation...")
         time.sleep(ONTOLOGY_PROPAGATION_WAIT_SECONDS)
+        _verify_entity_types(ontology_id)
         return ontology_id, entity_type_id
 
     # ASYNC CASE (most common in Fabric preview)
@@ -2722,6 +2760,7 @@ def create_ontology(
             if item.get("displayName") == ontology_name:
                 ontology_id = item["id"]
                 print(f"✓ Ontology ready: {ontology_id}")
+                _verify_entity_types(ontology_id)
                 return ontology_id, entity_type_id
 
         raise RuntimeError(

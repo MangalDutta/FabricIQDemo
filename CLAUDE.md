@@ -1,0 +1,1 @@
+I'm building one single click Microsoft Fabric data agent creation using ontology. Act as an Azure and Microsoft Fabric expert to help in Automate this.
